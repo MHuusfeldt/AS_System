@@ -1,0 +1,55 @@
+name: Automated Portfolio Monitoring
+
+on:
+  schedule:
+    # Run Monday-Friday at 9 AM EST (14:00 UTC)
+    - cron: '0 14 * * 1-5'
+    # Run Monday mornings for weekly report
+    - cron: '0 13 * * 1'
+  workflow_dispatch:  # Allow manual triggers
+
+jobs:
+  portfolio_monitoring:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      run: |
+        # Clone the repository manually
+        git clone https://github.com/MHuusfeldt/AS_System.git /tmp/AS_System
+        cd /tmp/AS_System
+        ls -la
+        
+    - name: Set up Python environment
+      run: |
+        # Use the pre-installed Python
+        python3 --version
+        python3 -m pip install --upgrade pip
+        
+    - name: Install dependencies
+      run: |
+        cd /tmp/AS_System
+        python3 -m pip install -r requirements.txt
+        
+    - name: Run Portfolio Monitoring
+      env:
+        PORTFOLIO_SYMBOLS: ${{ secrets.PORTFOLIO_SYMBOLS }}
+        ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+        GMAIL_USER: ${{ secrets.GMAIL_USER }}
+        GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+        SEND_SCHEDULED_REPORTS: ${{ github.event.schedule == '0 13 * * 1' && 'true' || 'false' }}
+      run: |
+        cd /tmp/AS_System
+        python3 Automated_monitor.py
+        
+    - name: Display results
+      run: |
+        cd /tmp/AS_System
+        echo "=== Portfolio Monitoring Results ==="
+        if [ -f "previous_scores.json" ]; then
+          echo "Results file found:"
+          cat previous_scores.json
+        else
+          echo "No results file found"
+        fi
+        echo "=== End Results ==="
