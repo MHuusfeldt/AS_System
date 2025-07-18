@@ -1,0 +1,63 @@
+name: Automated Portfolio Monitoring
+
+on:
+  schedule:
+    # Run Monday-Friday at 9 AM EST (14:00 UTC)
+    - cron: '0 14 * * 1-5'
+    # Run Monday mornings for weekly report
+    - cron: '0 13 * * 1'
+  workflow_dispatch:  # Allow manual triggers
+
+jobs:
+  portfolio_monitoring:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      run: |
+        # Clone the repository manually since external actions are restricted
+        git clone https://github.com/MHuusfeldt/AS_System.git /tmp/AS_System
+        cd /tmp/AS_System
+        ls -la
+        echo "Repository cloned successfully"
+      
+    - name: Set up Python
+      run: |
+        # Use the pre-installed Python (already available on ubuntu-latest)
+        python3 --version
+        python3 -m pip install --upgrade pip
+        echo "Python setup complete"
+        
+    - name: Install dependencies
+      run: |
+        cd /tmp/AS_System
+        python3 -m pip install -r requirements.txt
+        echo "Dependencies installed from requirements.txt"
+        
+    - name: Run Portfolio Monitoring
+      env:
+        PORTFOLIO_SYMBOLS: ${{ secrets.PORTFOLIO_SYMBOLS }}
+        ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+        GMAIL_USER: ${{ secrets.GMAIL_USER }}
+        GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+        SEND_SCHEDULED_REPORTS: ${{ github.event.schedule == '0 13 * * 1' && 'true' || 'false' }}
+      run: |
+        cd /tmp/AS_System
+        python3 Automated_monitor.py
+        echo "Portfolio monitoring completed"
+      
+    - name: Save and display results
+      run: |
+        cd /tmp/AS_System
+        echo "=== Portfolio Monitoring Results ==="
+        if [ -f "previous_scores.json" ]; then
+          echo "Results file found and saved:"
+          cat previous_scores.json
+          echo ""
+          echo "File size: $(wc -c < previous_scores.json) bytes"
+        else
+          echo "No results file found"
+          echo "Files in directory:"
+          ls -la
+        fi
+        echo "=== End Results ==="

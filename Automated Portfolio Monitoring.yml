@@ -13,23 +13,26 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
+    - name: Checkout code
       run: |
-        # Clone the repository manually
+        # Clone the repository manually since external actions are restricted
         git clone https://github.com/MHuusfeldt/AS_System.git /tmp/AS_System
         cd /tmp/AS_System
         ls -la
-        
-    - name: Set up Python environment
+        echo "Repository cloned successfully"
+      
+    - name: Set up Python
       run: |
-        # Use the pre-installed Python
+        # Use the pre-installed Python (already available on ubuntu-latest)
         python3 --version
         python3 -m pip install --upgrade pip
+        echo "Python setup complete"
         
     - name: Install dependencies
       run: |
         cd /tmp/AS_System
         python3 -m pip install -r requirements.txt
+        echo "Dependencies installed from requirements.txt"
         
     - name: Run Portfolio Monitoring
       env:
@@ -41,15 +44,20 @@ jobs:
       run: |
         cd /tmp/AS_System
         python3 Automated_monitor.py
-        
-    - name: Display results
+        echo "Portfolio monitoring completed"
+      
+    - name: Save and display results
       run: |
         cd /tmp/AS_System
         echo "=== Portfolio Monitoring Results ==="
         if [ -f "previous_scores.json" ]; then
-          echo "Results file found:"
+          echo "Results file found and saved:"
           cat previous_scores.json
+          echo ""
+          echo "File size: $(wc -c < previous_scores.json) bytes"
         else
           echo "No results file found"
+          echo "Files in directory:"
+          ls -la
         fi
         echo "=== End Results ==="
