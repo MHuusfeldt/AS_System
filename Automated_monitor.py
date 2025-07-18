@@ -122,6 +122,224 @@ def score_pe(pe, industry_pe):
     else:
         return 0
 
+def score_forward_pe(forward_pe, industry_pe):
+    """Score based on forward P/E (more predictive than trailing)"""
+    if forward_pe <= 0:
+        return 0
+    
+    relative_pe = forward_pe / industry_pe if industry_pe > 0 else 1
+    
+    if relative_pe < 0.5:
+        return 10
+    elif relative_pe < 0.7:
+        return 8
+    elif relative_pe < 0.9:
+        return 6
+    elif relative_pe < 1.1:
+        return 5
+    elif relative_pe < 1.3:
+        return 3
+    elif relative_pe < 1.5:
+        return 2
+    else:
+        return 1
+
+def score_peg(peg):
+    """Enhanced PEG scoring"""
+    if peg <= 0:
+        return 0
+    if peg < 0.5:
+        return 10
+    elif peg < 0.75:
+        return 8
+    elif peg < 1.0:
+        return 6
+    elif peg < 1.5:
+        return 4
+    elif peg < 2.0:
+        return 2
+    else:
+        return 0
+
+def score_pb(pb):
+    """Price-to-Book scoring"""
+    if pb <= 0:
+        return 0
+    if pb < 1.0:
+        return 10
+    elif pb < 1.5:
+        return 8
+    elif pb < 2.5:
+        return 6
+    elif pb < 4.0:
+        return 4
+    else:
+        return 2
+
+def score_roe(roe):
+    """Return on Equity scoring"""
+    if roe <= 0:
+        return 0
+    if roe > 25:
+        return 10
+    elif roe > 20:
+        return 8
+    elif roe > 15:
+        return 6
+    elif roe > 10:
+        return 4
+    elif roe > 5:
+        return 2
+    else:
+        return 0
+
+def score_eps_growth(growth):
+    """EPS growth scoring"""
+    if growth > 25:
+        return 10
+    elif growth > 15:
+        return 8
+    elif growth > 10:
+        return 6
+    elif growth > 5:
+        return 4
+    elif growth > 0:
+        return 2
+    else:
+        return 0
+
+def score_revenue_growth(growth, has_data=True):
+    """Revenue growth scoring"""
+    if not has_data or growth is None:
+        return 0
+    if growth > 20:
+        return 10
+    elif growth > 15:
+        return 8
+    elif growth > 10:
+        return 6
+    elif growth > 5:
+        return 4
+    elif growth > 0:
+        return 2
+    else:
+        return 0
+
+def score_fcf_trend(fcf_values, has_data=True):
+    """Free cash flow trend scoring"""
+    if not has_data or not fcf_values or len(fcf_values) < 2 or all(x == 0 for x in fcf_values):
+        return 0
+    
+    positive_count = sum(1 for x in fcf_values if x > 0)
+    
+    # Check for improvement trend
+    if len(fcf_values) >= 3:
+        recent_avg = np.mean(fcf_values[:2])
+        older_avg = np.mean(fcf_values[1:])
+        if recent_avg > older_avg and positive_count >= 2:
+            return 10
+    
+    if positive_count == len(fcf_values):
+        return 8
+    elif positive_count >= len(fcf_values) * 0.6:
+        return 6
+    elif positive_count > 0:
+        return 4
+    else:
+        return 0
+
+def score_debt_equity(de):
+    """Debt-to-equity scoring"""
+    if de < 0:
+        return 0
+    if de < 30:
+        return 10
+    elif de < 50:
+        return 8
+    elif de < 100:
+        return 6
+    elif de < 200:
+        return 4
+    else:
+        return 2
+
+def score_dividend_yield(dy):
+    """Dividend yield scoring"""
+    if dy <= 0:
+        return 0
+    if dy > 5:
+        return 10
+    elif dy > 3:
+        return 8
+    elif dy > 1:
+        return 6
+    else:
+        return 4
+
+def score_gross_margin(gm):
+    """Gross margin scoring"""
+    if gm <= 0:
+        return 0
+    if gm > 60:
+        return 10
+    elif gm > 40:
+        return 8
+    elif gm > 25:
+        return 6
+    elif gm > 15:
+        return 4
+    else:
+        return 2
+
+def score_ev_ebitda(ev_ebitda):
+    """EV/EBITDA scoring"""
+    if ev_ebitda <= 0:
+        return 0
+    if ev_ebitda < 8:
+        return 10
+    elif ev_ebitda < 12:
+        return 8
+    elif ev_ebitda < 15:
+        return 6
+    elif ev_ebitda < 20:
+        return 4
+    elif ev_ebitda < 25:
+        return 2
+    else:
+        return 0
+
+def score_price_sales(ps_ratio):
+    """Price-to-Sales scoring"""
+    if ps_ratio <= 0:
+        return 0
+    if ps_ratio < 1:
+        return 10
+    elif ps_ratio < 2:
+        return 8
+    elif ps_ratio < 4:
+        return 6
+    elif ps_ratio < 6:
+        return 4
+    elif ps_ratio < 10:
+        return 2
+    else:
+        return 0
+
+def score_analyst_upside(upside_percent):
+    """Score based on analyst price target upside"""
+    if upside_percent > 25:
+        return 10
+    elif upside_percent > 15:
+        return 8
+    elif upside_percent > 5:
+        return 6
+    elif upside_percent > -5:
+        return 5
+    elif upside_percent > -15:
+        return 3
+    else:
+        return 1
+
 # Include ALL your exact scoring functions:
 # score_forward_pe, score_peg, score_pb, score_roe, score_eps_growth, 
 # score_revenue_growth, score_fcf_trend, score_debt_equity, score_dividend_yield,
@@ -247,7 +465,7 @@ def calculate_scores_exact(info, industry_pe=20, score_weights=None):
         price_sales = safe_float(info.get("priceToSalesTrailing12Months", 0))
         roe = safe_float(info.get("roe", 0)) * 100 if info.get("roe") else 0
         de = safe_float(info.get("de", 0))
-        dy = safe_float(info.get("dy", 0)) * 100 if info.get("dy") else 0
+        dy = safe_float(info.get("dy", 0))  # Use as-is, already a percentage
         gm = safe_float(info.get("gm", 0)) * 100 if info.get("gm") else 0
         eps_growth = safe_float(info.get("eps_growth", 0)) * 100 if info.get("eps_growth") else 0
         rev_growth = safe_float(info.get("revenue_growth", 0)) * 100 if info.get("revenue_growth") else 0
@@ -432,6 +650,110 @@ def main():
         sys.exit(1)
     
     print("✅ Monitoring complete with exact AS_MH_v6 scoring system!")
+
+def check_significant_changes_exact(results):
+    """Check for significant changes in stock scores"""
+    significant_changes = []
+    
+    try:
+        # Try to load previous scores
+        if os.path.exists('previous_scores.json'):
+            with open('previous_scores.json', 'r') as f:
+                previous_scores = json.load(f)
+        else:
+            previous_scores = {}
+        
+        # Check for significant changes (threshold of 1.0 points)
+        for result in results:
+            symbol = result['symbol']
+            current_score = result['score']
+            
+            if symbol in previous_scores:
+                previous_score = previous_scores[symbol]
+                change = current_score - previous_score
+                
+                if abs(change) >= 1.0:  # Significant change threshold
+                    significant_changes.append({
+                        'symbol': symbol,
+                        'previous_score': previous_score,
+                        'current_score': current_score,
+                        'change': change
+                    })
+        
+        # Save current scores for next run
+        current_scores = {result['symbol']: result['score'] for result in results}
+        with open('previous_scores.json', 'w') as f:
+            json.dump(current_scores, f, indent=2)
+        
+        return significant_changes
+        
+    except Exception as e:
+        print(f"Warning: Could not check for significant changes: {e}")
+        return []
+
+def send_email_alert_exact(results, significant_changes):
+    """Send email alert with exact scoring analysis"""
+    try:
+        # Only send email if environment variables are set
+        gmail_user = os.environ.get('GMAIL_USER')
+        gmail_password = os.environ.get('GMAIL_PASSWORD')
+        alert_email = os.environ.get('ALERT_EMAIL')
+        
+        if not all([gmail_user, gmail_password, alert_email]):
+            print("📧 Email credentials not configured - skipping email alert")
+            return False
+        
+        # Create email content
+        subject = f"Portfolio Alert - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        body = f"""
+Portfolio Monitoring Alert - AS_MH_v6 Scoring System
+
+Analysis Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+"""
+        
+        if significant_changes:
+            body += "🚨 SIGNIFICANT CHANGES DETECTED:\n\n"
+            for change in significant_changes:
+                body += f"• {change['symbol']}: {change['previous_score']:.1f} → {change['current_score']:.1f} ({change['change']:+.1f})\n"
+            body += "\n"
+        
+        body += "📊 CURRENT PORTFOLIO STATUS:\n\n"
+        
+        # Sort by score (highest first)
+        sorted_results = sorted(results, key=lambda x: x['score'], reverse=True)
+        
+        for result in sorted_results:
+            body += f"• {result['symbol']}: {result['score']:.1f}/10 - {result['recommendation']}\n"
+        
+        body += f"\n📈 PORTFOLIO SUMMARY:\n"
+        body += f"• Average Score: {sum(r['score'] for r in results) / len(results):.1f}/10\n"
+        body += f"• Strong Buys (≥8.0): {len([r for r in results if r['score'] >= 8.0])}\n"
+        body += f"• Buys (≥6.5): {len([r for r in results if 6.5 <= r['score'] < 8.0])}\n"
+        body += f"• Holds (4.0-6.5): {len([r for r in results if 4.0 <= r['score'] < 6.5])}\n"
+        body += f"• Sells (≤4.0): {len([r for r in results if r['score'] < 4.0])}\n"
+        
+        body += "\n\nGenerated by AS_MH_v6 Automated Portfolio Monitor"
+        
+        # Send email
+        msg = MIMEMultipart()
+        msg['From'] = gmail_user
+        msg['To'] = alert_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(gmail_user, gmail_password)
+        server.send_message(msg)
+        server.quit()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        return False
 
 if __name__ == "__main__":
     main()
