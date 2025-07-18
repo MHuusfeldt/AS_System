@@ -15,6 +15,29 @@ import json
 import sys
 import time
 
+# Portfolio loading function
+def load_portfolio_from_file():
+    """Load portfolio from JSON file created by AS_MH_v6"""
+    try:
+        if os.path.exists('portfolio_config.json'):
+            with open('portfolio_config.json', 'r') as f:
+                portfolio_data = json.load(f)
+            
+            symbols = portfolio_data.get('symbols', [])
+            last_updated = portfolio_data.get('last_updated', 'Unknown')
+            
+            print(f"✅ Loaded portfolio from file: {len(symbols)} stocks")
+            print(f"📅 Last updated: {last_updated}")
+            print(f"📊 Stocks: {', '.join(symbols)}")
+            
+            return symbols
+        else:
+            print("⚠️ No portfolio file found. Using default symbols.")
+            return None
+    except Exception as e:
+        print(f"❌ Error loading portfolio: {e}")
+        return None
+
 # Import your exact scoring weights and methodology
 DEFAULT_SCORE_WEIGHTS = {
     "PE": 0.10,
@@ -590,9 +613,16 @@ def main():
     else:
         score_weights = DEFAULT_SCORE_WEIGHTS
     
-    # Get portfolio symbols
-    portfolio_str = os.environ.get('PORTFOLIO_SYMBOLS', 'AAPL,MSFT,GOOGL')
-    portfolio = [s.strip() for s in portfolio_str.split(',') if s.strip()]
+    # Try to load portfolio from file first
+    portfolio_symbols = load_portfolio_from_file()
+    
+    # If no portfolio file, fall back to environment variable or default
+    if not portfolio_symbols:
+        portfolio_symbols_env = os.environ.get('PORTFOLIO_SYMBOLS', 'AAPL,MSFT,GOOGL')
+        portfolio_symbols = [s.strip() for s in portfolio_symbols_env.split(',')]
+        print(f"📈 Using environment/default symbols: {', '.join(portfolio_symbols)}")
+    
+    portfolio = portfolio_symbols
     
     print(f"📊 Analyzing {len(portfolio)} stocks with exact AS_MH_v6 scoring: {', '.join(portfolio)}")
     print(f"⚖️ Using {len(score_weights)} weighted metrics")
@@ -706,12 +736,35 @@ def send_email_alert_exact(results, significant_changes):
         # Create email content
         subject = f"Portfolio Alert - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         
+        # Get portfolio information
+        portfolio_info = ""
+        if os.path.exists('portfolio_config.json'):
+            try:
+                with open('portfolio_config.json', 'r') as f:
+                    portfolio_data = json.load(f)
+                
+                symbols = portfolio_data.get('symbols', [])
+                last_updated = portfolio_data.get('last_updated', 'Unknown')
+                
+                portfolio_info = f"""
+📊 Portfolio Information:
+• Portfolio Size: {len(symbols)} stocks
+• Symbols: {', '.join(symbols)}
+• Last Sync: {last_updated}
+• Source: AS_MH_v6 Application
+
+"""
+            except:
+                portfolio_info = "📊 Portfolio: Using default symbols\n\n"
+        else:
+            portfolio_info = "📊 Portfolio: Using environment/default symbols\n\n"
+        
         body = f"""
 Portfolio Monitoring Alert - AS_MH_v6 Scoring System
 
 Analysis Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-"""
+{portfolio_info}"""
         
         if significant_changes:
             body += "🚨 SIGNIFICANT CHANGES DETECTED:\n\n"

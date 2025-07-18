@@ -43,7 +43,16 @@ jobs:
         SEND_SCHEDULED_REPORTS: ${{ github.event.schedule == '0 13 * * 1' && 'true' || 'false' }}
       run: |
         cd /tmp/AS_System
-        python3 Automated_monitor.py
+        
+        # Check if portfolio config file exists and use it, otherwise use environment variables
+        if [ -f "portfolio_config.json" ]; then
+          echo "📊 Using portfolio from config file"
+          python3 Automated_monitor.py
+        else
+          echo "📊 Using environment/default portfolio symbols"
+          python3 Automated_monitor.py
+        fi
+        
         echo "Portfolio monitoring completed"
       
     - name: Save and display results

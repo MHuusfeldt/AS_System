@@ -186,6 +186,60 @@ def init_session_state():
     
     if "selected_symbols" not in st.session_state:
         st.session_state.selected_symbols = []
+    
+    # Initialize portfolio if it doesn't exist
+    if "portfolio" not in st.session_state:
+        st.session_state.portfolio = []
+
+# Portfolio sync functions
+def save_portfolio_to_file():
+    """Save portfolio to JSON file for automated monitoring"""
+    import json
+    import os
+    
+    portfolio_data = {
+        'symbols': st.session_state.portfolio,
+        'last_updated': datetime.now().isoformat(),
+        'total_stocks': len(st.session_state.portfolio)
+    }
+    
+    try:
+        with open('portfolio_config.json', 'w') as f:
+            json.dump(portfolio_data, f, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"Error saving portfolio: {e}")
+        return False
+
+def auto_sync_if_enabled():
+    """Auto-sync portfolio if enabled"""
+    if st.session_state.get('auto_sync_portfolio', False):
+        if save_portfolio_to_file():
+            st.success("🔄 Portfolio auto-synced with automated monitor!")
+        else:
+            st.warning("⚠️ Auto-sync failed")
+
+def get_portfolio_sync_status():
+    """Get current sync status between portfolio and monitor"""
+    import json
+    import os
+    
+    try:
+        if os.path.exists('portfolio_config.json'):
+            with open('portfolio_config.json', 'r') as f:
+                portfolio_data = json.load(f)
+            
+            file_symbols = set(portfolio_data.get('symbols', []))
+            current_symbols = set(st.session_state.portfolio)
+            
+            if file_symbols == current_symbols:
+                return "synced", portfolio_data.get('last_updated', 'Unknown')
+            else:
+                return "out_of_sync", portfolio_data.get('last_updated', 'Unknown')
+        else:
+            return "not_synced", None
+    except Exception:
+        return "error", None
 
 @st.cache_data(ttl=86400)  # Cache for 24 hours
 def discover_danish_stocks():
@@ -5692,6 +5746,7 @@ def main():
                         
                         if added_count > 0:
                             st.success(f"Added {added_count} stocks to portfolio!")
+                            auto_sync_if_enabled()  # Auto-sync if enabled
                             st.rerun()
                         else:
                             st.info("All symbols are already in your portfolio")
@@ -5706,6 +5761,7 @@ def main():
                                 if symbol not in st.session_state.portfolio:
                                     st.session_state.portfolio.append(symbol)
                                     st.success(f"Added {symbol}!")
+                                    auto_sync_if_enabled()  # Auto-sync if enabled
                                     st.rerun()
                                 else:
                                     st.info(f"{symbol} already in portfolio")
@@ -5714,7 +5770,48 @@ def main():
                 st.markdown("**📊 Portfolio Stats**")
                 st.metric("Total Stocks", len(st.session_state.portfolio))
                 
+                # Portfolio sync status
+                sync_status, last_updated = get_portfolio_sync_status()
+                
+                if sync_status == "synced":
+                    st.success("🔄 Synced with Monitor")
+                    if last_updated:
+                        st.caption(f"Last sync: {last_updated[:16]}")
+                elif sync_status == "out_of_sync":
+                    st.warning("⚠️ Out of sync - Click sync!")
+                    if last_updated:
+                        st.caption(f"Last sync: {last_updated[:16]}")
+                elif sync_status == "not_synced":
+                    st.info("📄 Not synced yet")
+                else:
+                    st.error("❌ Sync status error")
+                
+                # Sync controls
                 if st.session_state.portfolio:
+                    st.markdown("---")
+                    st.markdown("**🔄 Monitor Integration**")
+                    
+                    # Sync button
+                    if st.button("🔄 Sync with Automated Monitor", type="primary"):
+                        if save_portfolio_to_file():
+                            st.success("✅ Portfolio synced with automated monitoring!")
+                            st.info("Your portfolio will now be monitored automatically")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to sync portfolio")
+                    
+                    # Auto-sync toggle
+                    auto_sync = st.checkbox(
+                        "🔄 Auto-sync on changes",
+                        value=st.session_state.get('auto_sync_portfolio', False),
+                        help="Automatically sync portfolio when changes are made"
+                    )
+                    st.session_state['auto_sync_portfolio'] = auto_sync
+                    
+                    # Quick portfolio analysis
+                    if st.button("📈 Quick Portfolio Analysis"):
+                        analyze_portfolio_quick(st.session_state.portfolio)
+                else:
                     # Quick portfolio analysis
                     if st.button("📈 Quick Portfolio Analysis"):
                         analyze_portfolio_quick(st.session_state.portfolio)
@@ -5752,6 +5849,7 @@ def main():
                             for symbol in symbols_to_remove:
                                 st.session_state.portfolio.remove(symbol)
                             st.success(f"Removed {len(symbols_to_remove)} stocks")
+                            auto_sync_if_enabled()  # Auto-sync if enabled
                             st.rerun()
                 
                 with col2:
@@ -5767,6 +5865,7 @@ def main():
                     
                     if st.button("🗑️ Clear All"):
                         st.session_state.portfolio = []
+                        auto_sync_if_enabled()  # Auto-sync if enabled
                         st.rerun()
                 
                 with col3:
