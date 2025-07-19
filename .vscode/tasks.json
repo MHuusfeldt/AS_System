@@ -4,7 +4,7 @@
 		{
 			"label": "Run Stock Analysis Hub",
 			"type": "shell",
-			"command": "streamlit run AS_MH_v6.py",
+			"command": "streamlit run AS_MH_v6.py --server.port 8501",
 			"group": "build",
 			"isBackground": true,
 			"problemMatcher": []
