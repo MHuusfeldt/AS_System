@@ -135,7 +135,9 @@ def display_comprehensive_analysis(fetcher, scores, final_score):
 
     with fund_tab:
         st.subheader("Fundamental Score")
-        st.progress(final_score / 10)
+        # Clamp the value between 0.0 and 1.0 for st.progress
+        progress_value = max(0.0, min(1.0, final_score / 10.0))
+        st.progress(progress_value)
         st.markdown(f"### Final Score: **{final_score:.2f} / 10**")
 
         st.plotly_chart(create_enhanced_score_chart(scores, fetcher.symbol), use_container_width=True)
