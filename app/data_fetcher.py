@@ -134,6 +134,36 @@ def get_3year_price_performance(symbol):
     # ... (keep your existing get_3year_price_performance logic)
     pass
 
+class PortfolioDataFetcher:
+    """Fetches and holds data for a portfolio of multiple stocks."""
+    def __init__(self, symbols):
+        self.symbols = symbols
+        self.all_data = {}
+
+    @st.cache_data(ttl=1800)
+    def fetch_all_data(_self):
+        """
+        Fetches fundamental data for all symbols in the portfolio.
+        Using _self to work with st.cache_data as it hashes the arguments.
+        """
+        data = {}
+        for symbol in _self.symbols:
+            try:
+                info = fetch_yahoo_info(symbol)
+                if info and info.get('regularMarketPrice') is not None:
+                    data[symbol] = info
+                else:
+                    # Attempt to fetch with .CO for Danish stocks if initial fails
+                    if not symbol.endswith('.CO') and info is None:
+                        danish_symbol = f"{symbol}.CO"
+                        info = fetch_yahoo_info(danish_symbol)
+                        if info and info.get('regularMarketPrice') is not None:
+                            data[symbol] = info # Store with original symbol key
+            except Exception as e:
+                st.error(f"Failed to fetch data for {symbol}: {e}")
+        _self.all_data = data
+        return _self.all_data
+
 class StockDataFetcher:
     def __init__(self, symbol):
         self.symbol = symbol

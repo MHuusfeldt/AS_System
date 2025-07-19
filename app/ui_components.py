@@ -8,9 +8,15 @@ import plotly.express as px
 import asyncio
 
 # Import new backend functions
-from app.data_fetcher import StockDataFetcher
+from app.config import (
+    DANISH_STOCKS, SP500_STOCKS, NASDAQ100_STOCKS, EUROPEAN_STOCKS,
+    DEFAULT_SCORE_WEIGHTS, SECTOR_SCORING_MODELS, INDUSTRY_PE_MAP
+)
+from app.data_fetcher import (
+    StockDataFetcher, PortfolioDataFetcher, get_3year_financial_history, get_3year_price_performance
+)
 from app.scoring import ScoreCalculator
-from app.portfolio import PortfolioManager
+from app.portfolio import PortfolioManager, init_db
 
 def format_currency(value, currency='USD', decimals=2):
     """Format a monetary value with the appropriate currency symbol."""
@@ -179,11 +185,35 @@ def display_single_stock_analysis():
             display_comprehensive_analysis(fetcher, scores, final_score)
 
 def display_portfolio_manager():
-    """UI for the portfolio management tab."""
-    st.header("Portfolio Manager")
-    
-    portfolio_manager = PortfolioManager()
+    """Displays the portfolio management interface."""
+    st.title("💼 Portfolio Manager")
+
+    portfolio_manager = st.session_state.portfolio_manager
     portfolio = portfolio_manager.get_portfolio()
+
+    # Always display the add stock form
+    with st.form("add_stock_form"):
+        new_stock = st.text_input("Add Stock Symbol (e.g., AAPL, NOVO-B.CO)")
+        submitted = st.form_submit_button("Add Stock")
+        if submitted and new_stock:
+            if portfolio_manager.add_stock(new_stock.upper()):
+                st.success(f"Added {new_stock.upper()} to your portfolio.")
+                st.rerun()
+            else:
+                st.error(f"{new_stock.upper()} is already in your portfolio.")
+
+    if not portfolio:
+        st.info("Your portfolio is empty. Add stocks using the form above to get started.", icon="ℹ️")
+        return  # Stop further execution if portfolio is empty
+
+    # This part will only run if the portfolio is not empty
+    with st.spinner("Loading portfolio data..."):
+        fetcher = PortfolioDataFetcher(portfolio)
+        all_data = fetcher.fetch_all_data()
+
+    if not all_data:
+        st.warning("Could not fetch data for the stocks in your portfolio. Please check the symbols or try again later.")
+        return
 
     # --- UI for adding stocks ---
     st.subheader("Add Stock to Portfolio")
