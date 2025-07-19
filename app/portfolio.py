@@ -61,13 +61,71 @@ def save_portfolio_to_file(symbols):
         st.error(f"Error saving portfolio file: {e}")
         return False
 
-def sync_portfolio():
-    """Syncs the DB portfolio to the JSON file."""
-    symbols = load_portfolio_from_db()
-    if save_portfolio_to_file(symbols):
-        st.success("✅ Portfolio synced with automated monitor!")
-    else:
-        st.error("❌ Portfolio sync failed.")
+class PortfolioManager:
+    def __init__(self, db_path=DB_PATH):
+        self.db_path = db_path
+        init_db(self.db_path)
+
+    def get_portfolio(self):
+        """Load portfolio symbols from the database."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT symbol FROM portfolio ORDER BY symbol")
+            symbols = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            return symbols
+        except sqlite3.Error:
+            return []
+
+    def add_stock(self, symbol):
+        """Add a stock to the portfolio."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO portfolio (symbol) VALUES (?)", (symbol,))
+        conn.commit()
+        conn.close()
+
+    def update_portfolio(self, symbols):
+        """Overwrite the portfolio with a new list of symbols."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM portfolio")
+        cursor.executemany("INSERT INTO portfolio (symbol) VALUES (?)", [(s,) for s in symbols])
+        conn.commit()
+        conn.close()
+
+    def save_portfolio_to_json(self):
+        """Save the current DB portfolio to the JSON config file."""
+        symbols = self.get_portfolio()
+        return save_portfolio_to_file(symbols)
+
+    def get_portfolio_analysis(self):
+        """Fetch and analyze all stocks in the portfolio."""
+        # Import locally to prevent circular dependencies
+        from app.data_fetcher import StockDataFetcher
+        from app.scoring import ScoreCalculator
+
+        symbols = self.get_portfolio()
+        if not symbols:
+            return []
+
+        fetcher = StockDataFetcher()
+        calculator = ScoreCalculator()
+        
+        all_data = []
+        for symbol in symbols:
+            fetcher.symbol = symbol
+            fetcher.fetch_all_data()
+            if fetcher.info:
+                scores, final_score = calculator.calculate_total_score(fetcher.info, fetcher.technical_data)
+                all_data.append({
+                    "symbol": symbol,
+                    "info": fetcher.info,
+                    "scores": scores,
+                    "score": final_score
+                })
+        return all_data
 
 # --- Portfolio Analysis ---
 def analyze_portfolio_optimized(portfolio_symbols):
