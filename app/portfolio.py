@@ -8,9 +8,9 @@ import sqlite3
 # --- Database Management ---
 DB_PATH = 'portfolio.db'
 
-def init_db():
+def init_db(db_path=DB_PATH):
     """Initialize the SQLite database."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS portfolio (
