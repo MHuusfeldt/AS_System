@@ -168,7 +168,32 @@ class StockDataFetcher:
     def __init__(self, symbol):
         self.symbol = symbol
         self.info = None
-        self.technical_data = None
+        self.financials_3y = None
+        self.price_performance = None
+
+    @st.cache_data(ttl=1800)
+    def fetch_all_data(_self):
+        """
+        Fetches all necessary data for a single stock: info, financials, and price performance.
+        Using _self to work with st.cache_data.
+        """
+        _self.info = fetch_yahoo_info(_self.symbol)
+        _self.financials_3y = get_3year_financial_history(_self.symbol)
+        _self.price_performance = get_3year_price_performance(_self.symbol)
+
+        # Basic validation to ensure some data was fetched
+        if _self.info and _self.info.get('regularMarketPrice') is not None:
+            return True
+        # Try with .CO if the first attempt failed for a non-.CO symbol
+        elif not _self.symbol.endswith('.CO'):
+            danish_symbol = f"{_self.symbol}.CO"
+            _self.info = fetch_yahoo_info(danish_symbol)
+            if _self.info and _self.info.get('regularMarketPrice') is not None:
+                _self.financials_3y = get_3year_financial_history(danish_symbol)
+                _self.price_performance = get_3year_price_performance(danish_symbol)
+                return True
+
+        return False
 
     async def async_fetch_info(self):
         """Asynchronously fetch stock info."""

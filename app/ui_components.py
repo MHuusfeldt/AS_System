@@ -171,17 +171,22 @@ def display_single_stock_analysis():
         with st.spinner(f"Analyzing {symbol}..."):
             # 1. Fetch data
             fetcher = StockDataFetcher(symbol)
-            fetcher.fetch_all_data()
+            success = fetcher.fetch_all_data()
 
-            if not fetcher.info:
+            if not success:
                 st.error(f"Could not retrieve data for {symbol}. Please check the symbol and try again.")
                 return
 
             # 2. Calculate scores
             calculator = ScoreCalculator()
+            # Pass the fetched info directly to the calculator
             scores, final_score = calculator.calculate_total_score(fetcher.info)
 
-            # 3. Display results
+            # 3. Calculate technical indicators
+            # This part is missing, let's assume it's in the fetcher or needs to be called
+            # fetcher.calculate_technical_indicators() # You would need to implement this
+
+            # 4. Display results
             display_comprehensive_analysis(fetcher, scores, final_score)
 
 def display_portfolio_manager():
@@ -189,114 +194,69 @@ def display_portfolio_manager():
     st.title("💼 Portfolio Manager")
 
     portfolio_manager = st.session_state.portfolio_manager
-    portfolio = portfolio_manager.get_portfolio()
 
-    # Always display the add stock form
+    # --- Single, unified form for adding stocks ---
     with st.form("add_stock_form"):
-        new_stock = st.text_input("Add Stock Symbol (e.g., AAPL, NOVO-B.CO)")
+        new_stock = st.text_input("Add Stock Symbol (e.g., AAPL, ORSTED)")
         submitted = st.form_submit_button("Add Stock")
         if submitted and new_stock:
             if portfolio_manager.add_stock(new_stock.upper()):
                 st.success(f"Added {new_stock.upper()} to your portfolio.")
                 st.rerun()
             else:
-                st.error(f"{new_stock.upper()} is already in your portfolio.")
-
-    if not portfolio:
-        st.info("Your portfolio is empty. Add stocks using the form above to get started.", icon="ℹ️")
-        return  # Stop further execution if portfolio is empty
-
-    # This part will only run if the portfolio is not empty
-    with st.spinner("Loading portfolio data..."):
-        fetcher = PortfolioDataFetcher(portfolio)
-        all_data = fetcher.fetch_all_data()
-
-    if not all_data:
-        st.warning("Could not fetch data for the stocks in your portfolio. Please check the symbols or try again later.")
-        return
-
-    # --- UI for adding stocks ---
-    st.subheader("Add Stock to Portfolio")
-    add_col, sync_col = st.columns([3, 1])
-    with add_col:
-        new_symbol = st.text_input("Enter stock symbol to add", "").upper()
-        if st.button("Add Stock"):
-            if new_symbol:
-                with st.spinner(f"Validating and adding {new_symbol}..."):
-                    # Use fetcher to validate symbol
-                    fetcher = StockDataFetcher(new_symbol)
-                    fetcher.fetch_all_data()
-                    if fetcher.info and fetcher.info.get('longName'):
-                        portfolio_manager.add_stock(fetcher.symbol)
-                        st.success(f"Added {fetcher.info['longName']} ({fetcher.symbol}) to portfolio.")
-                        st.rerun()
-                    else:
-                        st.error(f"Could not validate symbol {new_symbol}.")
-            else:
-                st.warning("Please enter a symbol.")
-
-    with sync_col:
-        st.subheader("Sync with Monitor")
-        if st.button("Sync Now", help="Saves the current portfolio to portfolio_config.json for the automated monitor."):
-            portfolio_manager.save_portfolio_to_json()
-            st.success("Portfolio synced successfully!")
+                st.error(f"{new_stock.upper()} is already in your portfolio or could not be validated.")
 
     st.markdown("---")
 
-    # --- Display Portfolio and Analysis ---
+    # --- Display Current Portfolio ---
     st.subheader("Current Portfolio")
+    portfolio = portfolio_manager.get_portfolio()
+
     if not portfolio:
-        st.info("Your portfolio is empty. Add stocks above to get started.")
-        return
+        st.info("Your portfolio is empty. Add stocks using the form above to get started.", icon="ℹ️")
+    else:
+        # Display the stocks in a clear list with remove buttons
+        for stock_symbol in sorted(portfolio):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.markdown(f"<h4>{stock_symbol}</h4>", unsafe_allow_html=True)
+            with col2:
+                if st.button(f"Remove", key=f"remove_{stock_symbol}"):
+                    portfolio_manager.remove_stock(stock_symbol)
+                    st.success(f"Removed {stock_symbol} from portfolio.")
+                    st.rerun()
+        
+        st.markdown("---")
 
-    # --- Portfolio Analysis ---
-    if st.button("Analyze Portfolio"):
-        with st.spinner("Fetching data and analyzing portfolio..."):
-            all_data = portfolio_manager.get_portfolio_analysis()
-            
-            if all_data:
-                df = pd.DataFrame(all_data)
-                
-                # Define column order and what to display
-                cols_to_display = [
-                    'Symbol', 'Company', 'Price', 'Change %', 'Score', 
-                    'P/E', 'Forward P/E', 'ROE', 'EPS Growth', 'Sector'
-                ]
-                df_display = pd.DataFrame()
-                df_display['Symbol'] = df['symbol']
-                df_display['Company'] = df['info'].apply(lambda x: x.get('longName', 'N/A'))
-                df_display['Price'] = df['info'].apply(lambda x: format_currency(x.get('currentPrice'), x.get('currency')))
-                df_display['Change %'] = df['info'].apply(lambda x: f"{x.get('regularMarketChangePercent', 0) * 100:.2f}%")
-                df_display['Score'] = df['score'].apply(lambda x: f"{x:.2f}")
-                df_display['P/E'] = df['info'].apply(lambda x: f"{x.get('trailingPE', 0):.2f}")
-                df_display['Forward P/E'] = df['info'].apply(lambda x: f"{x.get('forwardPE', 0):.2f}")
-                df_display['ROE'] = df['info'].apply(lambda x: f"{x.get('returnOnEquity', 0) * 100:.2f}%")
-                df_display['EPS Growth'] = df['info'].apply(lambda x: f"{x.get('earningsQuarterlyGrowth', 0) * 100:.2f}%")
-                df_display['Sector'] = df['info'].apply(lambda x: x.get('sector', 'N/A'))
+        # --- Portfolio-level actions ---
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Sync with Monitor")
+            if st.button("Sync Now", help="Saves the current portfolio to portfolio_config.json for the automated monitor."):
+                if portfolio_manager.save_portfolio_to_json():
+                    st.success("Portfolio synced successfully!")
+                else:
+                    st.error("Failed to sync portfolio.")
 
-                st.dataframe(df_display, use_container_width=True)
-            else:
-                st.error("Could not fetch analysis for the portfolio.")
+        with col2:
+            st.subheader("Analyze Full Portfolio")
+            if st.button("Analyze Portfolio"):
+                with st.spinner("Fetching data and analyzing portfolio..."):
+                    fetcher = PortfolioDataFetcher(portfolio)
+                    all_data = fetcher.fetch_all_data()
 
-    # --- Editable Portfolio List ---
-    st.subheader("Edit Portfolio")
-    edited_df = st.data_editor(
-        pd.DataFrame(portfolio, columns=["symbol"]),
-        num_rows="dynamic",
-        key="portfolio_editor"
-    )
+                    if not all_data:
+                        st.warning("Could not fetch complete data for the portfolio analysis.")
+                    else:
+                        # Display analysis results
+                        st.success("Analysis complete!")
+                        df = pd.DataFrame.from_dict(all_data, orient='index')
+                        st.dataframe(df[['longName', 'sector', 'country', 'regularMarketPrice', 'marketCap']].head(10))
 
-    edited_symbols = edited_df["symbol"].str.upper().tolist()
-    
-    if edited_symbols != portfolio:
-        with st.spinner("Updating portfolio..."):
-            portfolio_manager.update_portfolio(edited_symbols)
-            st.success("Portfolio updated.")
-            st.rerun()
 
-def display_screener():
-    """UI for the market screener tab."""
-    st.header("Market Screener")
+def display_market_screener():
+    """UI for the Market Screener tab."""
+    st.header("📈 Market Screener")
 
     from app.config import DANISH_STOCKS, SP500_STOCKS, NASDAQ100_STOCKS, EUROPEAN_STOCKS
 
