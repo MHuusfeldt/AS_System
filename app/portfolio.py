@@ -83,8 +83,20 @@ class PortfolioManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("INSERT OR IGNORE INTO portfolio (symbol) VALUES (?)", (symbol,))
+        rows_affected = cursor.rowcount
         conn.commit()
         conn.close()
+        return rows_affected > 0
+
+    def remove_stock(self, symbol):
+        """Remove a stock from the portfolio."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM portfolio WHERE symbol = ?", (symbol,))
+        rows_affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return rows_affected > 0
 
     def update_portfolio(self, symbols):
         """Overwrite the portfolio with a new list of symbols."""
@@ -110,15 +122,14 @@ class PortfolioManager:
         if not symbols:
             return []
 
-        fetcher = StockDataFetcher()
         calculator = ScoreCalculator()
         
         all_data = []
         for symbol in symbols:
-            fetcher.symbol = symbol
-            fetcher.fetch_all_data()
-            if fetcher.info:
-                scores, final_score = calculator.calculate_total_score(fetcher.info, fetcher.technical_data)
+            fetcher = StockDataFetcher(symbol)
+            success = fetcher.fetch_all_data()
+            if success and fetcher.info:
+                scores, final_score = calculator.calculate_total_score(fetcher.info)
                 all_data.append({
                     "symbol": symbol,
                     "info": fetcher.info,

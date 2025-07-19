@@ -131,8 +131,79 @@ def get_3year_financial_history(symbol):
 @st.cache_data(ttl=1800)
 def get_3year_price_performance(symbol):
     """Get 3-year price performance with Danish stock support and enhanced metrics"""
-    # ... (keep your existing get_3year_price_performance logic)
-    pass
+    def try_fetch_price_data(sym):
+        """Helper function to try fetching price data for a symbol"""
+        try:
+            from datetime import datetime, timedelta
+            import numpy as np
+            
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=3*365)
+            
+            ticker = yf.Ticker(sym)
+            hist_data = ticker.history(start=start_date, end=end_date)
+            ticker_info = ticker.info
+            
+            if hist_data.empty:
+                return None
+            
+            current_price = hist_data['Close'].iloc[-1]
+            
+            performance = {
+                'current_price': current_price,
+                'price_data': hist_data,
+                'ticker_info': ticker_info,
+                'max_3y': hist_data['Close'].max(),
+                'min_3y': hist_data['Close'].min(),
+                'volatility': hist_data['Close'].pct_change().std() * np.sqrt(252) * 100
+            }
+            
+            # Calculate returns for different periods
+            periods = [('3m', 65), ('6m', 130), ('1y', 252), ('2y', 504), ('3y', 756)]
+            
+            for period_name, days_back in periods:
+                if len(hist_data) >= days_back:
+                    past_price = hist_data['Close'].iloc[-days_back]
+                    return_pct = ((current_price - past_price) / past_price) * 100
+                    performance[f'return_{period_name}'] = return_pct
+                else:
+                    performance[f'return_{period_name}'] = 0
+            
+            # Calculate Sharpe ratio (simplified)
+            returns = hist_data['Close'].pct_change().dropna()
+            if len(returns) > 0:
+                sharpe = (returns.mean() * 252) / (returns.std() * np.sqrt(252))
+                performance['sharpe_ratio'] = sharpe
+            
+            return performance
+            
+        except Exception:
+            return None
+    
+    try:
+        # First, try the original symbol
+        result = try_fetch_price_data(symbol)
+        if result:
+            return result
+        
+        # If original fails, try Danish stock variations
+        if not symbol.endswith('.CO'):
+            if symbol in DANISH_STOCKS:
+                danish_symbol = DANISH_STOCKS[symbol]
+                result = try_fetch_price_data(danish_symbol)
+                if result:
+                    return result
+            
+            co_symbol = f"{symbol}.CO"
+            result = try_fetch_price_data(co_symbol)
+            if result:
+                return result
+        
+        return {}
+        
+    except Exception as e:
+        st.error(f"Error fetching price performance for {symbol}: {e}")
+        return {}
 
 class PortfolioDataFetcher:
     """Fetches and holds data for a portfolio of multiple stocks."""
@@ -165,11 +236,12 @@ class PortfolioDataFetcher:
         return _self.all_data
 
 class StockDataFetcher:
-    def __init__(self, symbol):
+    def __init__(self, symbol=None):
         self.symbol = symbol
         self.info = None
         self.financials_3y = None
         self.price_performance = None
+        self.technical_data = None
 
     @st.cache_data(ttl=1800)
     def fetch_all_data(_self):
@@ -195,6 +267,10 @@ class StockDataFetcher:
 
         return False
 
+    async def async_fetch_batch_info(self, symbols):
+        """Fetch info for a batch of symbols asynchronously."""
+        return await get_batch_yahoo_info(symbols)
+
     async def async_fetch_info(self):
         """Asynchronously fetch stock info."""
         async with aiohttp.ClientSession() as session:
@@ -202,17 +278,48 @@ class StockDataFetcher:
 
     def calculate_technical_indicators(self):
         """Calculate technical indicators for the stock."""
-        if not self.info:
+        if not self.price_performance or not self.price_performance.get('price_data'):
+            self.technical_data = None
             return
 
-        # Example calculation: Moving Average
         try:
-            close_prices = self.info['historicalData'][-30:]  # Last 30 days
-            self.technical_data = {
-                'moving_average': sum(day['close'] for day in close_prices) / len(close_prices)
-            }
+            import pandas as pd
+            import numpy as np
+            
+            # Get price data
+            df = self.price_performance['price_data'].copy()
+            
+            # Moving Averages
+            df['SMA_20'] = df['Close'].rolling(window=20).mean()
+            df['SMA_50'] = df['Close'].rolling(window=50).mean()
+            df['SMA_200'] = df['Close'].rolling(window=200).mean()
+            
+            # RSI
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
+            
+            # MACD
+            ema_12 = df['Close'].ewm(span=12).mean()
+            ema_26 = df['Close'].ewm(span=26).mean()
+            df['MACD'] = ema_12 - ema_26
+            df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
+            df['MACD_Histogram'] = df['MACD'] - df['MACD_Signal']
+            
+            # Bollinger Bands
+            rolling_mean = df['Close'].rolling(window=20).mean()
+            rolling_std = df['Close'].rolling(window=20).std()
+            df['BB_Upper'] = rolling_mean + (rolling_std * 2)
+            df['BB_Lower'] = rolling_mean - (rolling_std * 2)
+            df['BB_Middle'] = rolling_mean
+            
+            self.technical_data = df
+            
         except Exception as e:
             print(f"Error calculating technical indicators for {self.symbol}: {e}")
+            self.technical_data = None
 
     async def fetch_and_process_batch(self, symbols):
         """

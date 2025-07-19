@@ -185,8 +185,11 @@ def apply_sector_adjustments(scores, sector):
     return adjusted_scores
 
 class ScoreCalculator:
+    """Calculates scores for stocks based on various financial metrics."""
+
     def __init__(self, weights=None):
-        self.weights = weights if weights is not None else DEFAULT_SCORE_WEIGHTS
+        """Initializes the ScoreCalculator with a specific set of weights."""
+        self.weights = weights if weights is not None else DEFAULT_SCORE_WEIGHTS.copy()
 
     def calculate_individual_scores(self, info, technical_data=None):
         """Calculates all individual metric scores for a stock."""
@@ -240,9 +243,14 @@ class ScoreCalculator:
         return scores
 
     def calculate_total_score(self, info, technical_data=None):
-        """Calculates the final weighted score for a stock."""
+        """Calculates the total weighted score for a stock based on its info."""
+        if not info:
+            return {}, 0.0
+
+        # First, calculate the individual raw scores
         scores = self.calculate_individual_scores(info, technical_data)
-        
+
+        # Then, apply sector-specific adjustments
         sector = info.get("sector")
         adjusted_scores = apply_sector_adjustments(scores, sector)
 

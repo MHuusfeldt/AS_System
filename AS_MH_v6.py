@@ -9,9 +9,13 @@ import time
 import json
 import numpy as np
 import io
+import os
 from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
+
+# Page configuration
+st.set_page_config(layout="wide", page_title="AS System v6 - Enhanced")
 
 # Configuration
 API_KEY = "7J1AJVC9MAYLRRA7"
@@ -1195,8 +1199,12 @@ def display_comprehensive_analysis(analyzer):
         
         if analyzer.fundamental_info:
             company_name = analyzer.fundamental_info.get('name', 'Unknown')[:20]
+            # Try to get current price from fundamental info first
+            current_price = (analyzer.fundamental_info.get('currentPrice', 0) or 
+                           analyzer.fundamental_info.get('regularMarketPrice', 0) or 0)
         
-        if analyzer.data is not None and len(analyzer.data) > 0:
+        # If no price from fundamental info, try technical data
+        if current_price == 0 and analyzer.data is not None and len(analyzer.data) > 0:
             current_price = analyzer.data['Close'].iloc[-1]
         
         st.metric("Company", company_name)
@@ -5369,11 +5377,18 @@ def main():
                                     # Display the comprehensive analysis using existing function
                                     # Create an analyzer object for backward compatibility
                                     analyzer = ComprehensiveStockAnalyzer(symbol, "1y")
-                                    analyzer.info = info
-                                    analyzer.scores = scores
+                                    analyzer.fundamental_info = info
+                                    analyzer.fundamental_scores = scores
                                     analyzer.final_score = overall_score
-                                    analyzer.recommendation = recommendation
-                                    analyzer.color = color
+                                    
+                                    # Create proper recommendation structure that display_comprehensive_analysis expects
+                                    analyzer.recommendation = {
+                                        'combined_score': overall_score,
+                                        'fundamental_score': overall_score,  # Using overall score as fundamental since no technical
+                                        'technical_score': 5.0,  # Default neutral technical score
+                                        'recommendation': recommendation,
+                                        'color': color
+                                    }
                                     
                                     display_comprehensive_analysis(analyzer)
                                     successful_analyses.append(symbol)

@@ -13,7 +13,8 @@ from app.config import (
     DEFAULT_SCORE_WEIGHTS, SECTOR_SCORING_MODELS, INDUSTRY_PE_MAP
 )
 from app.data_fetcher import (
-    StockDataFetcher, PortfolioDataFetcher, get_3year_financial_history, get_3year_price_performance
+    StockDataFetcher, PortfolioDataFetcher, get_3year_financial_history, 
+    get_3year_price_performance, get_batch_yahoo_info
 )
 from app.scoring import ScoreCalculator
 from app.portfolio import PortfolioManager, init_db
@@ -179,14 +180,12 @@ def display_single_stock_analysis():
                 st.error(f"Could not retrieve data for {symbol}. Please check the symbol and try again.")
                 return
 
-            # 2. Calculate scores
-            calculator = ScoreCalculator()
-            # Pass the fetched info directly to the calculator
-            scores, final_score = calculator.calculate_total_score(fetcher.info)
+            # 2. Calculate technical indicators
+            fetcher.calculate_technical_indicators()
 
-            # 3. Calculate technical indicators
-            # This part is missing, let's assume it's in the fetcher or needs to be called
-            # fetcher.calculate_technical_indicators() # You would need to implement this
+            # 3. Calculate scores
+            calculator = ScoreCalculator()
+            scores, final_score = calculator.calculate_total_score(fetcher.info, fetcher.technical_data)
 
             # 4. Display results
             display_comprehensive_analysis(fetcher, scores, final_score)
@@ -279,9 +278,8 @@ def display_market_screener():
         st.info(f"Screening {len(stock_list)} stocks from {selected_market} asynchronously...")
         
         with st.spinner("Fetching data in parallel... this will be fast!"):
-            fetcher = StockDataFetcher()
-            # Run the async batch fetch
-            batch_data = asyncio.run(fetcher.fetch_and_process_batch(stock_list))
+            # Use the async batch fetch
+            batch_data = asyncio.run(get_batch_yahoo_info(stock_list))
 
         st.info("Calculating scores...")
         results = []
@@ -293,21 +291,21 @@ def display_market_screener():
             return
 
         total_stocks = len(batch_data)
-        for i, data in enumerate(batch_data):
+        for i, (symbol, info) in enumerate(batch_data.items()):
             try:
-                if data and data.get('info'):
-                    scores, final_score = calculator.calculate_total_score(data['info'])
+                if info:
+                    scores, final_score = calculator.calculate_total_score(info)
                     results.append({
-                        'Symbol': data['symbol'],
-                        'Company': data['info'].get('longName', 'N/A'),
+                        'Symbol': symbol,
+                        'Company': info.get('longName', 'N/A'),
                         'Score': final_score,
-                        'Price': data['info'].get('currentPrice', 0),
-                        'Currency': data['info'].get('currency', 'USD'),
-                        'Sector': data['info'].get('sector', 'N/A'),
-                        'P/E': data['info'].get('trailingPE', 0)
+                        'Price': info.get('currentPrice', 0),
+                        'Currency': info.get('currency', 'USD'),
+                        'Sector': info.get('sector', 'N/A'),
+                        'P/E': info.get('trailingPE', 0)
                     })
             except Exception as e:
-                st.warning(f"Could not process {data.get('symbol', 'Unknown')}: {e}")
+                st.warning(f"Could not process {symbol}: {e}")
             
             progress_bar.progress((i + 1) / total_stocks)
 
@@ -326,30 +324,10 @@ def display_market_screener():
 
 
 def display_main_dashboard():
-    """The main dashboard UI."""
+    """Sets up the main dashboard with tabs."""
     st.title("Advanced Stock Analysis System v7")
     st.markdown("Refactored for performance, maintainability, and enhanced scoring.")
-
-    # ... (rebuild your UI here by calling functions from other modules)
     
-    # Example:
-    # from app.portfolio import display_portfolio_manager
-    # from app.screener import display_screener
-    
-    tab1, tab2, tab3 = st.tabs(["Single Stock Analysis", "Portfolio Manager", "Market Screener"])
-
-    with tab1:
-        display_single_stock_analysis()
-    
-    with tab2:
-        display_portfolio_manager()
-        
-    with tab3:
-        st.header("Market Screener")
-        display_market_screener()
-
-def display_main_dashboard():
-    """Sets up the main dashboard with tabs."""
     st.sidebar.title("Navigation")
     selected_tab = st.sidebar.radio("Go to", ["Single Stock Analysis", "Portfolio Manager", "Market Screener"])
 

@@ -1,26 +1,10 @@
-# main_app.py
+# main_app.py - Use AS_MH_v6.py as main
 import streamlit as st
-import warnings
-from app.ui_components import display_main_dashboard
-from app.portfolio import PortfolioManager
+import subprocess
+import sys
 
-# Suppress warnings
-warnings.filterwarnings('ignore')
-
-# Page configuration
-st.set_page_config(layout="wide", page_title="AS System v7")
-
-def main():
-    """
-    Main function to run the Streamlit app.
-    The database is initialized automatically by the PortfolioManager.
-    """
-    # Initialize PortfolioManager in session state if it doesn't exist
-    if 'portfolio_manager' not in st.session_state:
-        st.session_state.portfolio_manager = PortfolioManager()
-
-    # Display the main user interface
-    display_main_dashboard()
-
+# Redirect to AS_MH_v6.py
 if __name__ == "__main__":
-    main()
+    st.error("Please run AS_MH_v6.py instead of main_app.py")
+    st.info("The main application is now AS_MH_v6.py")
+    st.stop()
