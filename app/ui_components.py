@@ -344,4 +344,16 @@ def display_main_dashboard():
         
     with tab3:
         st.header("Market Screener")
-        display_screener()
+        display_market_screener()
+
+def display_main_dashboard():
+    """Sets up the main dashboard with tabs."""
+    st.sidebar.title("Navigation")
+    selected_tab = st.sidebar.radio("Go to", ["Single Stock Analysis", "Portfolio Manager", "Market Screener"])
+
+    if selected_tab == "Single Stock Analysis":
+        display_single_stock_analysis()
+    elif selected_tab == "Portfolio Manager":
+        display_portfolio_manager()
+    elif selected_tab == "Market Screener":
+        display_market_screener()
