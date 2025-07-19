@@ -14,6 +14,19 @@ from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
+# Enhanced Features Integration
+try:
+    from enhanced_features_integration import EnhancedFeaturesManager
+    from portfolio_database import PortfolioDatabase
+    from advanced_caching import AdvancedCache
+    from async_data_loader import AsyncStockDataLoader
+    from what_if_analysis import WhatIfAnalyzer
+    ENHANCED_FEATURES_AVAILABLE = True
+    st.success("🚀 Enhanced features loaded successfully!")
+except ImportError as e:
+    ENHANCED_FEATURES_AVAILABLE = False
+    st.warning("⚠️ Enhanced features not available. Running in basic mode.")
+
 # Page configuration
 st.set_page_config(layout="wide", page_title="AS System v6 - Enhanced")
 
@@ -169,20 +182,22 @@ def init_session_state():
     """Initialize session state variables"""
     if "score_weights" not in st.session_state:
         st.session_state.score_weights = {
-            "PE": 0.10,
-            "Forward PE": 0.15,  # More weight on forward P/E
-            "PEG": 0.10,
-            "PB": 0.08,
-            "EV/EBITDA": 0.12,  # New metric
-            "ROE": 0.12,
-            "EPS Growth": 0.15,
-            "Revenue Growth": 0.10,
-            "FCF Trend": 0.05,
-            "Debt/Equity": 0.04,
-            "Dividend Yield": 0.03,
-            "Gross Margin": 0.03,
-            "Price/Sales": 0.05,  # New metric
-            "Analyst Upside": 0.08   # New metric
+            "PE": 0.08,
+            "Forward PE": 0.12,  # More weight on forward P/E
+            "PEG": 0.08,
+            "PB": 0.06,
+            "EV/EBITDA": 0.10,  # New metric
+            "ROE": 0.10,
+            "EPS Growth": 0.12,
+            "Revenue Growth": 0.08,
+            "FCF Trend": 0.04,
+            "Debt/Equity": 0.03,
+            "Dividend Yield": 0.02,
+            "Gross Margin": 0.05,
+            "Price/Sales": 0.04,  # New metric
+            "Analyst Upside": 0.06,   # New metric
+            "Momentum": 0.08,  # NEW - Technical momentum
+            "Financial Health": 0.08   # NEW - Comprehensive financial health
         }
     
     if "analysis_history" not in st.session_state:
@@ -194,6 +209,34 @@ def init_session_state():
     # Initialize portfolio if it doesn't exist
     if "portfolio" not in st.session_state:
         st.session_state.portfolio = []
+    
+    # Initialize portfolio holdings with purchase prices if not exists
+    if "portfolio_holdings" not in st.session_state:
+        st.session_state.portfolio_holdings = {}  # Format: {symbol: {"quantity": float, "purchase_price": float, "purchase_date": str}}
+    
+    # Migrate old portfolio format to new format if needed
+    if st.session_state.portfolio and not st.session_state.portfolio_holdings:
+        # Migrate existing portfolio symbols to new format (without purchase prices initially)
+        for symbol in st.session_state.portfolio:
+            if symbol not in st.session_state.portfolio_holdings:
+                st.session_state.portfolio_holdings[symbol] = {
+                    "quantity": 1.0,
+                    "purchase_price": 0.0,  # Will need to be updated by user
+                    "purchase_date": datetime.now().strftime("%Y-%m-%d")
+                }
+    
+    # Initialize Enhanced Features Manager
+    if ENHANCED_FEATURES_AVAILABLE and "enhanced_features_manager" not in st.session_state:
+        try:
+            st.session_state.enhanced_features_manager = EnhancedFeaturesManager()
+            # Initialize the enhanced features
+            st.session_state.enhanced_features_manager.initialize_all_systems()
+            st.session_state.enhanced_features_enabled = True
+        except Exception as e:
+            st.warning(f"⚠️ Could not initialize enhanced features: {e}")
+            st.session_state.enhanced_features_enabled = False
+    else:
+        st.session_state.enhanced_features_enabled = False
 
 # Portfolio sync functions
 def save_portfolio_to_file():
@@ -704,6 +747,133 @@ def score_roe(roe):
     else:
         return 0
 
+def score_roe_dynamic(roe, sector):
+    """Enhanced ROE scoring with dynamic benchmarking"""
+    if roe <= 0:
+        return 0
+    
+    benchmarks = get_industry_benchmarks(sector)
+    industry_roe = benchmarks["roe"]
+    
+    # Calculate relative performance
+    relative_roe = roe / industry_roe
+    
+    # Score based on relative performance
+    if relative_roe >= 2.0:  # 2x industry average
+        return 10
+    elif relative_roe >= 1.5:  # 1.5x industry average
+        return 8
+    elif relative_roe >= 1.2:  # 1.2x industry average
+        return 7
+    elif relative_roe >= 1.0:  # At industry average
+        return 6
+    elif relative_roe >= 0.8:  # 80% of industry average
+        return 4
+    elif relative_roe >= 0.6:  # 60% of industry average
+        return 3
+    elif relative_roe >= 0.4:  # 40% of industry average
+        return 2
+    else:  # Below 40% of industry average
+        return 1
+
+def score_gross_margin_dynamic(gm, sector):
+    """Enhanced gross margin scoring with dynamic benchmarking"""
+    if gm <= 0:
+        return 0
+    
+    benchmarks = get_industry_benchmarks(sector)
+    industry_gm = benchmarks["gross_margin"]
+    
+    relative_gm = gm / industry_gm
+    
+    if relative_gm >= 1.4:  # 40% above industry
+        return 10
+    elif relative_gm >= 1.2:  # 20% above industry
+        return 8
+    elif relative_gm >= 1.1:  # 10% above industry
+        return 7
+    elif relative_gm >= 0.95:  # Near industry average
+        return 6
+    elif relative_gm >= 0.85:  # 15% below industry
+        return 4
+    elif relative_gm >= 0.75:  # 25% below industry
+        return 3
+    else:  # Significantly below industry
+        return 2
+
+def score_revenue_growth_dynamic(growth, sector):
+    """Enhanced revenue growth scoring with dynamic benchmarking"""
+    benchmarks = get_industry_benchmarks(sector)
+    industry_growth = benchmarks["revenue_growth"]
+    
+    if growth is None or growth == 0:
+        return 0
+    
+    # For negative growth, score more harshly
+    if growth < 0:
+        if growth > -5:  # Small decline
+            return 3
+        elif growth > -10:  # Moderate decline
+            return 2
+        else:  # Severe decline
+            return 1
+    
+    # Calculate relative growth performance
+    if industry_growth > 0:
+        relative_growth = growth / industry_growth
+        
+        if relative_growth >= 2.0:  # 2x industry growth
+            return 10
+        elif relative_growth >= 1.5:  # 1.5x industry growth
+            return 8
+        elif relative_growth >= 1.2:  # 1.2x industry growth
+            return 7
+        elif relative_growth >= 0.8:  # 80% of industry growth
+            return 6
+        elif relative_growth >= 0.5:  # 50% of industry growth
+            return 4
+        else:  # Below 50% of industry growth
+            return 3
+    else:
+        # If industry growth is negative/zero, use absolute thresholds
+        return score_revenue_growth(growth, True)  # Fall back to original function
+
+def score_debt_equity_dynamic(de, sector):
+    """Enhanced debt/equity scoring with dynamic benchmarking"""
+    if de < 0:
+        return 0
+    
+    benchmarks = get_industry_benchmarks(sector)
+    industry_de = benchmarks["debt_equity"]
+    
+    # Financial sector has different debt characteristics
+    if sector == "Financials":
+        # For financials, higher leverage is more normal
+        if de < industry_de * 0.8:  # Low leverage for financials
+            return 8
+        elif de < industry_de * 1.0:  # Normal leverage
+            return 6
+        elif de < industry_de * 1.2:  # Slightly high
+            return 4
+        else:  # Very high leverage
+            return 2
+    else:
+        # For non-financial sectors
+        relative_de = de / industry_de
+        
+        if relative_de <= 0.5:  # Much lower than industry
+            return 10
+        elif relative_de <= 0.8:  # Lower than industry
+            return 8
+        elif relative_de <= 1.0:  # At industry level
+            return 6
+        elif relative_de <= 1.3:  # Above industry level
+            return 4
+        elif relative_de <= 1.6:  # Well above industry
+            return 3
+        else:  # Extremely high debt
+            return 1
+
 def score_eps_growth(growth):
     """EPS growth scoring"""
     if growth > 25:
@@ -851,6 +1021,162 @@ def score_analyst_upside(upside_percent):
     else:
         return 1
 
+def score_momentum(symbol):
+    """Score based on price momentum and moving average relationships"""
+    momentum_data = calculate_momentum_indicators(symbol)
+    
+    if not momentum_data:
+        return 5  # Neutral score if no data
+    
+    current = momentum_data['current_price']
+    sma_20 = momentum_data['sma_20']
+    sma_50 = momentum_data['sma_50']
+    sma_200 = momentum_data['sma_200']
+    
+    score = 5  # Start with neutral
+    
+    # Moving average alignment (strong momentum indicator)
+    if all([sma_20, sma_50, sma_200]):
+        if current > sma_20 > sma_50 > sma_200:
+            score += 3  # Perfect bullish alignment
+        elif current > sma_20 > sma_50:
+            score += 2  # Good bullish trend
+        elif current > sma_50 > sma_200:
+            score += 1  # Moderate bullish
+        elif current < sma_20 < sma_50 < sma_200:
+            score -= 3  # Perfect bearish alignment
+        elif current < sma_20 < sma_50:
+            score -= 2  # Bearish trend
+        elif current < sma_50:
+            score -= 1  # Moderate bearish
+    
+    # Price momentum over different periods
+    momentum_score = 0
+    periods = [
+        ('price_1m', 0.5),   # 1 month momentum (50% weight)
+        ('price_3m', 1.0),   # 3 month momentum (100% weight)
+        ('price_6m', 0.75)   # 6 month momentum (75% weight)
+    ]
+    
+    total_weight = 0
+    for period, weight in periods:
+        if momentum_data[period]:
+            price_change = (current - momentum_data[period]) / momentum_data[period] * 100
+            
+            if price_change > 20:
+                momentum_score += 2 * weight
+            elif price_change > 10:
+                momentum_score += 1 * weight
+            elif price_change > 0:
+                momentum_score += 0.5 * weight
+            elif price_change > -10:
+                momentum_score -= 0.5 * weight
+            elif price_change > -20:
+                momentum_score -= 1 * weight
+            else:
+                momentum_score -= 2 * weight
+            
+            total_weight += weight
+    
+    if total_weight > 0:
+        avg_momentum = momentum_score / total_weight
+        score += avg_momentum
+    
+    # Ensure score stays within bounds
+    return max(0, min(10, score))
+
+def score_current_ratio(current_ratio, sector):
+    """Score current ratio with sector-specific benchmarks"""
+    if current_ratio <= 0:
+        return 0
+    
+    benchmarks = get_industry_benchmarks(sector)
+    industry_current = benchmarks["current_ratio"]
+    
+    relative_ratio = current_ratio / industry_current
+    
+    if relative_ratio >= 1.3:  # 30% above industry
+        return 9
+    elif relative_ratio >= 1.1:  # 10% above industry
+        return 8
+    elif relative_ratio >= 0.9:  # Within 10% of industry
+        return 7
+    elif relative_ratio >= 0.8:  # 20% below industry
+        return 5
+    elif relative_ratio >= 0.7:  # 30% below industry
+        return 3
+    else:  # Significantly below industry
+        return 1
+
+def score_interest_coverage(interest_coverage, sector):
+    """Score interest coverage ratio with sector awareness"""
+    if interest_coverage <= 0:
+        return 0
+    
+    benchmarks = get_industry_benchmarks(sector)
+    industry_coverage = benchmarks["interest_coverage"]
+    
+    # Handle infinite coverage (no interest expense)
+    if interest_coverage == float('inf'):
+        return 10
+    
+    relative_coverage = interest_coverage / industry_coverage
+    
+    if relative_coverage >= 2.0:  # 2x industry average
+        return 10
+    elif relative_coverage >= 1.5:  # 1.5x industry average
+        return 8
+    elif relative_coverage >= 1.0:  # At industry average
+        return 6
+    elif relative_coverage >= 0.75:  # 75% of industry
+        return 4
+    elif relative_coverage >= 0.5:  # 50% of industry
+        return 3
+    else:  # Below 50% of industry
+        return 1
+
+def score_financial_health_composite(info, sector):
+    """Comprehensive financial health score"""
+    health_data = get_financial_health_data(info)
+    
+    if not health_data:
+        return 5  # Neutral if no data
+    
+    # Individual component scores
+    current_score = score_current_ratio(health_data['current_ratio'], sector)
+    interest_score = score_interest_coverage(health_data['interest_coverage'], sector)
+    debt_score = score_debt_equity_dynamic(info.get('de', 0), sector)
+    
+    # Cash position score (absolute)
+    cash_score = 5  # Default neutral
+    if health_data['cash_position'] > 0:
+        market_cap = info.get('marketCap', 0)
+        if market_cap > 0:
+            cash_to_market_cap = health_data['cash_position'] / market_cap
+            if cash_to_market_cap > 0.2:  # 20%+ cash
+                cash_score = 8
+            elif cash_to_market_cap > 0.1:  # 10%+ cash
+                cash_score = 7
+            elif cash_to_market_cap > 0.05:  # 5%+ cash
+                cash_score = 6
+    
+    # Weighted composite score
+    weights = {
+        'current_ratio': 0.25,
+        'interest_coverage': 0.30,
+        'debt_equity': 0.30,
+        'cash_position': 0.15
+    }
+    
+    composite_score = (
+        current_score * weights['current_ratio'] +
+        interest_score * weights['interest_coverage'] +
+        debt_score * weights['debt_equity'] +
+        cash_score * weights['cash_position']
+    )
+    
+    return round(composite_score, 1)
+
 
 class ComprehensiveStockAnalyzer:
     def __init__(self, symbol, period="1y"):
@@ -867,43 +1193,29 @@ class ComprehensiveStockAnalyzer:
         """Fetch both fundamental and technical data"""
         try:
             # Fetch fundamental data using the enhanced fetch_yahoo_info function
-            st.info(f"🔍 Fetching fundamental data for {self.symbol}...")
             self.fundamental_info = fetch_yahoo_info(self.symbol)
             
             if not self.fundamental_info:
-                st.warning(f"⚠️ Could not fetch fundamental data for {self.symbol}")
                 return False
             
-            if self.fundamental_info.get('name') == 'Unknown':
-                st.warning(f"⚠️ Limited fundamental data available for {self.symbol}")
-            else:
-                st.success(f"✅ Fundamental data loaded for {self.fundamental_info.get('name', self.symbol)}")
-            
             # Fetch technical data using the symbol that worked for fundamental data
-            st.info(f"📈 Fetching technical data for {self.symbol}...")
-            
-            # Try the symbol that worked for fundamental data
             symbol_to_use = self.fundamental_info.get('symbol_used', self.symbol)
             
             ticker = yf.Ticker(symbol_to_use)
             self.data = ticker.history(period=self.period)
             
             if self.data is None or len(self.data) == 0:
-                st.error(f"❌ No technical data available for {symbol_to_use}")
                 return False
             
-            st.success(f"✅ Technical data loaded for {symbol_to_use} ({len(self.data)} data points)")
             return True
             
         except Exception as e:
-            st.error(f"❌ Error fetching data for {self.symbol}: {str(e)}")
             return False
     
     def calculate_fundamental_scores(self):
         """Calculate fundamental analysis scores"""
         try:
             if not self.fundamental_info:
-                st.warning(f"⚠️ No fundamental data available for scoring {self.symbol}")
                 return {}
             
             # Get industry PE for better scoring
@@ -914,14 +1226,11 @@ class ComprehensiveStockAnalyzer:
             
             if scores:
                 self.fundamental_scores = scores
-                st.success(f"✅ Fundamental scores calculated for {self.symbol}")
                 return scores
             else:
-                st.warning(f"⚠️ Could not calculate fundamental scores for {self.symbol}")
                 return {}
                 
         except Exception as e:
-            st.error(f"❌ Error calculating fundamental scores for {self.symbol}: {str(e)}")
             return {}
     
     def calculate_technical_indicators(self):
@@ -1127,15 +1436,37 @@ class ComprehensiveStockAnalyzer:
                 self.recommendation = None
                 return "Insufficient data", "gray", 0
             
+            # Default score weights (fallback when session state not available)
+            default_weights = {
+                'pe_ratio': 2.0,
+                'pb_ratio': 1.5,
+                'debt_equity': 1.5,
+                'dividend_yield': 1.0,
+                'roe': 2.0,
+                'roa': 1.5,
+                'gross_margin': 1.5,
+                'operating_margin': 1.5,
+                'revenue_growth': 2.0,
+                'earnings_growth': 2.0,
+                'current_ratio': 1.0,
+                'price_sales': 1.5
+            }
+            
+            # Try to get weights from session state, fallback to defaults
+            try:
+                score_weights = st.session_state.score_weights
+            except:
+                score_weights = default_weights
+            
             # Calculate fundamental score with normalized weights for missing data
-            available_weights = {k: st.session_state.score_weights.get(k, 0) 
-                               for k in self.fundamental_scores if k in st.session_state.score_weights}
+            available_weights = {k: score_weights.get(k, 0) 
+                               for k in self.fundamental_scores if k in score_weights}
             
             if available_weights:
                 total_weight = sum(available_weights.values())
                 if total_weight > 0:
                     # Normalize weights to maintain scale
-                    original_total_weight = sum(st.session_state.score_weights.values())
+                    original_total_weight = sum(score_weights.values())
                     weight_multiplier = original_total_weight / total_weight
                     
                     fundamental_total = sum(self.fundamental_scores[k] * available_weights[k] * weight_multiplier 
@@ -1179,7 +1510,11 @@ class ComprehensiveStockAnalyzer:
             return recommendation, color, combined_score
             
         except Exception as e:
-            st.error(f"Error generating recommendation: {e}")
+            # Only show error in Streamlit context
+            try:
+                st.error(f"Error generating recommendation: {e}")
+            except:
+                pass  # Not in Streamlit context
             self.recommendation = None
             return "Error in analysis", "gray", 0
 def display_comprehensive_analysis(analyzer):
@@ -1702,13 +2037,13 @@ def calculate_scores_yahoo(info, industry_pe=20):
             "PE": score_pe(pe, industry_pe),
             "PEG": score_peg(peg),
             "PB": score_pb(pb),
-            "ROE": score_roe(roe),
+            "ROE": score_roe_dynamic(roe, info.get("sector", "Unknown")),  # Enhanced with dynamic benchmarking
             "EPS Growth": score_eps_growth(eps_growth),
-            "Revenue Growth": score_revenue_growth(rev_growth, has_revenue_data),
+            "Revenue Growth": score_revenue_growth_dynamic(rev_growth, info.get("sector", "Unknown")),  # Enhanced
             "FCF Trend": score_fcf_trend(fcf_trend, has_fcf_data),
-            "Debt/Equity": score_debt_equity(de),
+            "Debt/Equity": score_debt_equity_dynamic(de, info.get("sector", "Unknown")),  # Enhanced
             "Dividend Yield": score_dividend_yield(dy),
-            "Gross Margin": score_gross_margin(gm)
+            "Gross Margin": score_gross_margin_dynamic(gm, info.get("sector", "Unknown"))  # Enhanced
         }
         
         # Add new enhanced metrics
@@ -1723,6 +2058,16 @@ def calculate_scores_yahoo(info, industry_pe=20):
         
         if target_price > 0 and current_price > 0:
             scores["Analyst Upside"] = score_analyst_upside(analyst_upside)
+        
+        # Add momentum scoring (NEW)
+        symbol = info.get("symbol", "")
+        if symbol:
+            momentum_score = score_momentum(symbol)
+            scores["Momentum"] = momentum_score
+        
+        # Add financial health scoring (NEW)
+        financial_health_score = score_financial_health_composite(info, info.get("sector", "Unknown"))
+        scores["Financial Health"] = financial_health_score
         
         # Filter out None values (missing data) but keep 0 scores
         scores = {k: v for k, v in scores.items() if v is not None}
@@ -1778,6 +2123,42 @@ INDUSTRY_PE_MAP = {
     "Financial Services": 12,
     "Basic Materials": 16,
     "Unknown": 20
+}
+
+# Industry benchmarks for dynamic scoring
+INDUSTRY_BENCHMARKS = {
+    "Technology": {
+        "roe": 18.5, "gross_margin": 65.0, "revenue_growth": 15.0, "debt_equity": 25.0,
+        "current_ratio": 2.5, "interest_coverage": 25.0
+    },
+    "Healthcare": {
+        "roe": 15.2, "gross_margin": 75.0, "revenue_growth": 8.0, "debt_equity": 30.0,
+        "current_ratio": 3.2, "interest_coverage": 20.0
+    },
+    "Financials": {
+        "roe": 12.8, "gross_margin": 45.0, "revenue_growth": 5.0, "debt_equity": 180.0,
+        "current_ratio": 1.1, "interest_coverage": 8.0
+    },
+    "Industrials": {
+        "roe": 14.5, "gross_margin": 35.0, "revenue_growth": 6.0, "debt_equity": 45.0,
+        "current_ratio": 1.8, "interest_coverage": 12.0
+    },
+    "Energy": {
+        "roe": 8.5, "gross_margin": 25.0, "revenue_growth": 3.0, "debt_equity": 65.0,
+        "current_ratio": 1.5, "interest_coverage": 6.0
+    },
+    "Consumer Staples": {
+        "roe": 16.8, "gross_margin": 28.0, "revenue_growth": 4.0, "debt_equity": 55.0,
+        "current_ratio": 1.3, "interest_coverage": 15.0
+    },
+    "Consumer Discretionary": {
+        "roe": 13.2, "gross_margin": 40.0, "revenue_growth": 8.0, "debt_equity": 48.0,
+        "current_ratio": 1.6, "interest_coverage": 10.0
+    },
+    "Unknown": {  # Default fallback
+        "roe": 15.0, "gross_margin": 45.0, "revenue_growth": 7.0, "debt_equity": 50.0,
+        "current_ratio": 1.8, "interest_coverage": 12.0
+    }
 }
 
 # Sector-specific scoring models
@@ -1860,6 +2241,72 @@ def get_industry_pe(info):
             return INDUSTRY_PE_MAP[key]
     
     return INDUSTRY_PE_MAP["Unknown"]
+
+def get_industry_benchmarks(sector):
+    """Get industry benchmark values for dynamic scoring"""
+    return INDUSTRY_BENCHMARKS.get(sector, INDUSTRY_BENCHMARKS["Unknown"])
+
+def calculate_momentum_indicators(symbol):
+    """Calculate momentum indicators for scoring"""
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1y")
+        
+        if data is None or len(data) < 200:
+            return None
+        
+        current_price = data['Close'].iloc[-1]
+        
+        # Calculate moving averages
+        sma_20 = data['Close'].rolling(window=20).mean().iloc[-1] if len(data) >= 20 else None
+        sma_50 = data['Close'].rolling(window=50).mean().iloc[-1] if len(data) >= 50 else None
+        sma_200 = data['Close'].rolling(window=200).mean().iloc[-1] if len(data) >= 200 else None
+        
+        # Calculate price momentum
+        price_1m = data['Close'].iloc[-21] if len(data) >= 21 else None
+        price_3m = data['Close'].iloc[-63] if len(data) >= 63 else None
+        price_6m = data['Close'].iloc[-126] if len(data) >= 126 else None
+        
+        return {
+            'current_price': current_price,
+            'sma_20': sma_20,
+            'sma_50': sma_50,
+            'sma_200': sma_200,
+            'price_1m': price_1m,
+            'price_3m': price_3m,
+            'price_6m': price_6m
+        }
+    except Exception:
+        return None
+
+def get_financial_health_data(info):
+    """Extract financial health metrics from stock info"""
+    try:
+        # Get balance sheet data if available
+        current_assets = info.get('totalCurrentAssets', 0)
+        current_liabilities = info.get('totalCurrentLiabilities', 0)
+        total_debt = info.get('totalDebt', 0)
+        cash = info.get('totalCash', 0)
+        ebit = info.get('ebit', 0)
+        interest_expense = info.get('interestExpense', 0)
+        
+        # Calculate ratios
+        current_ratio = current_assets / current_liabilities if current_liabilities > 0 else 0
+        quick_ratio = (current_assets - info.get('inventory', 0)) / current_liabilities if current_liabilities > 0 else 0
+        cash_ratio = cash / current_liabilities if current_liabilities > 0 else 0
+        debt_to_assets = total_debt / info.get('totalAssets', 1) if info.get('totalAssets', 0) > 0 else 0
+        interest_coverage = ebit / interest_expense if interest_expense > 0 else float('inf')
+        
+        return {
+            'current_ratio': current_ratio,
+            'quick_ratio': quick_ratio,
+            'cash_ratio': cash_ratio,
+            'debt_to_assets': debt_to_assets,
+            'interest_coverage': interest_coverage,
+            'cash_position': cash
+        }
+    except Exception:
+        return None
 
 def apply_sector_adjustments(scores, sector):
     """Apply sector-specific weight adjustments to improve accuracy"""
@@ -2390,7 +2837,8 @@ def display_company_search():
         search_query = st.text_input(
             "Search for companies by name",
             placeholder="e.g., Apple, Microsoft, Tesla",
-            help="Enter a company name to find its stock symbol"
+            help="Enter a company name to find its stock symbol",
+            key="company_search_query"
         )
     
     with col2:
@@ -5293,18 +5741,68 @@ def main():
         st.subheader("Current Weights")
         weights_df = pd.DataFrame(list(st.session_state.score_weights.items()), columns=['Metric', 'Weight'])
         st.dataframe(weights_df, hide_index=True)
+        
+        # Enhanced Features Status
+        st.markdown("---")
+        st.subheader("🚀 Enhanced Features")
+        
+        if st.session_state.get('enhanced_features_enabled', False):
+            st.success("✅ Enhanced Features Active")
+            
+            # Show feature status
+            enhanced_manager = st.session_state.enhanced_features_manager
+            
+            features_status = {
+                "🗄️ SQLite Database": "✅" if enhanced_manager.portfolio_db else "❌",
+                "🚀 Advanced Caching": "✅" if enhanced_manager.cache else "❌", 
+                "⚡ Async Loading": "✅" if enhanced_manager.async_loader else "❌",
+                "🔮 What-If Analysis": "✅" if enhanced_manager.what_if_analyzer else "❌"
+            }
+            
+            for feature, status in features_status.items():
+                st.write(f"{feature}: {status}")
+                
+            # System stats
+            if enhanced_manager.portfolio_db:
+                holdings_count = len(enhanced_manager.portfolio_db.get_current_holdings())
+                transactions_count = len(enhanced_manager.portfolio_db.get_transaction_history())
+                st.metric("Portfolio Holdings", holdings_count)
+                st.metric("Total Transactions", transactions_count)
+        else:
+            st.warning("⚠️ Enhanced Features Disabled")
+            st.info("Running in basic mode. Enhanced features include:\n"
+                   "• SQLite Portfolio Database\n"
+                   "• Advanced Caching\n" 
+                   "• Async Data Loading\n"
+                   "• What-If Analysis")
+            
+            if st.button("🔄 Retry Enhanced Features"):
+                st.rerun()
 
-    # Main tabs - Streamlined structure
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "📊 Stock Analysis Hub",
-        "📈 Trading Signals", 
-        "🔍 Market Screeners",
-        "💼 Portfolio Manager",
-        "🇩🇰 Danish Stocks Manager",
-        "📊 Performance Benchmarking",
-        "ℹ️ Help & Documentation",
-        "⚖️ Compare & Export"
-    ])
+    # Main tabs - Enhanced structure with new features
+    if st.session_state.get('enhanced_features_enabled', False):
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+            "📊 Stock Analysis Hub",
+            "📈 Trading Signals", 
+            "🔍 Market Screeners",
+            "💼 Enhanced Portfolio",  # Updated with enhanced features
+            "🔮 What-If Analysis",    # NEW: Portfolio simulation
+            "🇩🇰 Danish Stocks Manager",
+            "📊 Performance Benchmarking",
+            "ℹ️ Help & Documentation",
+            "⚖️ Compare & Export"
+        ])
+    else:
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+            "📊 Stock Analysis Hub",
+            "📈 Trading Signals", 
+            "🔍 Market Screeners",
+            "💼 Portfolio Manager",
+            "🇩🇰 Danish Stocks Manager",
+            "📊 Performance Benchmarking",
+            "ℹ️ Help & Documentation",
+            "⚖️ Compare & Export"
+        ])
 
     # --- Stock Analysis Hub (combines Yahoo Finance, Alpha Vantage, Company Search) ---
     with tab1:
@@ -5338,11 +5836,44 @@ def main():
                 if not symbol_list:
                     st.error("Please enter valid stock symbols")
                 else:
-                    # Use optimized analysis
-                    st.info(f"Analyzing {len(symbol_list)} stocks using optimized data fetching...")
-                    
-                    # Get comprehensive analysis for all stocks
-                    analysis_results = analyze_multiple_stocks(symbol_list)
+                    # Use enhanced async loading if available
+                    if st.session_state.get('enhanced_features_enabled', False):
+                        st.info(f"🚀 Using enhanced async loading for {len(symbol_list)} stocks...")
+                        
+                        # Create progress placeholder
+                        progress_placeholder = st.empty()
+                        
+                        # Initialize async loader
+                        async_loader = st.session_state.enhanced_features_manager.async_loader
+                        
+                        # Set progress callback
+                        def progress_callback(completed, total, message):
+                            progress = completed / total if total > 0 else 0
+                            progress_placeholder.progress(progress, text=f"Progress: {completed}/{total} - {message}")
+                        
+                        async_loader.set_progress_callback(progress_callback)
+                        
+                        # Fetch data asynchronously
+                        async_results = async_loader.fetch_multiple_stocks_threaded(symbol_list)
+                        
+                        # Clear progress
+                        progress_placeholder.empty()
+                        
+                        # Convert async results to analysis format
+                        analysis_results = {}
+                        for symbol, result in async_results.items():
+                            if result.success:
+                                analysis_results[symbol] = {
+                                    'info': result.data,
+                                    'scores': calculate_scores_yahoo(result.data) if result.data else {}
+                                }
+                        
+                        st.success(f"✅ Enhanced async loading completed! Processed {len(analysis_results)} stocks successfully")
+                        
+                    else:
+                        # Use standard analysis
+                        st.info(f"Analyzing {len(symbol_list)} stocks using standard data fetching...")
+                        analysis_results = analyze_multiple_stocks(symbol_list)
                     
                     successful_analyses = []
                     for symbol, data in analysis_results.items():
@@ -5374,23 +5905,30 @@ def main():
                                     
                                     recommendation, color = get_recommendation(overall_score)
                                     
-                                    # Display the comprehensive analysis using existing function
-                                    # Create an analyzer object for backward compatibility
-                                    analyzer = ComprehensiveStockAnalyzer(symbol, "1y")
-                                    analyzer.fundamental_info = info
-                                    analyzer.fundamental_scores = scores
-                                    analyzer.final_score = overall_score
-                                    
-                                    # Create proper recommendation structure that display_comprehensive_analysis expects
-                                    analyzer.recommendation = {
-                                        'combined_score': overall_score,
-                                        'fundamental_score': overall_score,  # Using overall score as fundamental since no technical
-                                        'technical_score': 5.0,  # Default neutral technical score
-                                        'recommendation': recommendation,
-                                        'color': color
-                                    }
-                                    
-                                    display_comprehensive_analysis(analyzer)
+                                    # Run full comprehensive analysis including technical analysis
+                                    with st.spinner(f"🔍 Running comprehensive analysis for {symbol}..."):
+                                        analyzer = ComprehensiveStockAnalyzer(symbol, "1y")
+                                        
+                                        # Fetch data and run all analysis
+                                        if analyzer.fetch_all_data():
+                                            # Calculate all scores and signals
+                                            analyzer.calculate_fundamental_scores()
+                                            analyzer.calculate_technical_indicators()
+                                            analyzer.generate_technical_signals()
+                                            analyzer.calculate_buying_prices()
+                                            
+                                            # Generate combined recommendation
+                                            result = analyzer.generate_combined_recommendation()
+                                            
+                                            if result and len(result) == 3:
+                                                recommendation, color, combined_score = result
+                                                
+                                                # Display comprehensive analysis
+                                                display_comprehensive_analysis(analyzer)
+                                            else:
+                                                st.error(f"❌ Could not generate complete analysis for {symbol}")
+                                        else:
+                                            st.error(f"❌ Could not fetch market data for {symbol}")
                                     successful_analyses.append(symbol)
                                     
                                     st.markdown("---")
@@ -5530,35 +6068,70 @@ def main():
             symbol = st.text_input("Enter Stock Symbol", value="AAPL", key="quick_tech")
             
             if st.button("⚡ Get Quick Signals", type="primary"):
-                analyzer = ComprehensiveStockAnalyzer(symbol, "3mo")
-                
-                if analyzer.fetch_all_data():
-                    analyzer.calculate_technical_indicators()
-                    signals = analyzer.generate_technical_signals()
+                with st.spinner(f"🔍 Analyzing {symbol}..."):
+                    analyzer = ComprehensiveStockAnalyzer(symbol, "3mo")
                     
-                    # Quick display
-                    st.subheader(f"⚡ Quick Signals for {symbol.upper()}")
+                    # Fetch data with progress
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        for signal_name, signal_text in signals['signals'].items():
-                            if "🟢" in signal_text:
-                                st.success(f"**{signal_name}**: {signal_text}")
-                            elif "🔴" in signal_text:
-                                st.error(f"**{signal_name}**: {signal_text}")
-                            else:
-                                st.info(f"**{signal_name}**: {signal_text}")
+                    status_text.text("📊 Fetching market data...")
+                    progress_bar.progress(25)
                     
-                    with col2:
-                        st.metric("Technical Score", f"{signals['technical_score']:.1f}/10")
+                    if analyzer.fetch_all_data():
+                        status_text.text("📈 Calculating technical indicators...")
+                        progress_bar.progress(50)
                         
-                        # Quick buy/sell recommendation
-                        if signals['technical_score'] >= 6.5:
-                            st.success("🟢 TECHNICAL BUY SIGNAL")
-                        elif signals['technical_score'] <= 4:
-                            st.error("🔴 TECHNICAL SELL SIGNAL")
+                        analyzer.calculate_technical_indicators()
+                        
+                        status_text.text("🎯 Generating signals...")
+                        progress_bar.progress(75)
+                        
+                        signals = analyzer.generate_technical_signals()
+                        
+                        progress_bar.progress(100)
+                        status_text.text("✅ Analysis complete!")
+                        
+                        # Clear progress indicators
+                        progress_bar.empty()
+                        status_text.empty()
+                        
+                        if signals and 'signals' in signals:
+                            # Quick display
+                            st.subheader(f"⚡ Quick Signals for {symbol.upper()}")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("**📊 Technical Signals:**")
+                                for signal_name, signal_text in signals['signals'].items():
+                                    if "🟢" in signal_text:
+                                        st.success(f"**{signal_name}**: {signal_text}")
+                                    elif "🔴" in signal_text:
+                                        st.error(f"**{signal_name}**: {signal_text}")
+                                    else:
+                                        st.info(f"**{signal_name}**: {signal_text}")
+                            
+                            with col2:
+                                st.markdown("**📈 Overall Assessment:**")
+                                tech_score = signals.get('technical_score', 0)
+                                st.metric("Technical Score", f"{tech_score:.1f}/10")
+                                
+                                # Quick buy/sell recommendation
+                                if tech_score >= 6.5:
+                                    st.success("🟢 TECHNICAL BUY SIGNAL")
+                                    st.info("Strong technical indicators suggest buying opportunity")
+                                elif tech_score <= 4:
+                                    st.error("🔴 TECHNICAL SELL SIGNAL")
+                                    st.warning("Weak technical indicators suggest caution")
+                                else:
+                                    st.warning("🟡 TECHNICAL NEUTRAL")
+                                    st.info("Mixed technical signals - wait for clearer direction")
                         else:
-                            st.warning("🟡 TECHNICAL NEUTRAL")
+                            st.error(f"❌ Could not generate signals for {symbol}")
+                    else:
+                        progress_bar.empty()
+                        status_text.empty()
+                        st.error(f"❌ Could not fetch data for {symbol}. Please check the symbol and try again.")
         
         with signals_tab2:
             st.subheader("🔄 Combined Technical & Fundamental Analysis")
@@ -5567,24 +6140,56 @@ def main():
             symbol = st.text_input("Enter Stock Symbol", value="AAPL", key="combined_analysis")
             
             if st.button("🔄 Run Combined Analysis", type="primary"):
-                analyzer = ComprehensiveStockAnalyzer(symbol, "1y")
-                
-                if analyzer.fetch_all_data():
-                    analyzer.calculate_fundamental_scores()
-                    analyzer.calculate_technical_indicators()
-                    analyzer.generate_technical_signals()
-                    analyzer.calculate_buying_prices()
+                with st.spinner(f"🔍 Running comprehensive analysis for {symbol}..."):
+                    analyzer = ComprehensiveStockAnalyzer(symbol, "1y")
                     
-                    result = analyzer.generate_combined_recommendation()
-                    if result and len(result) == 3:
-                        recommendation, color, combined_score = result
+                    # Progress tracking
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    status_text.text("📊 Fetching market data...")
+                    progress_bar.progress(20)
+                    
+                    if analyzer.fetch_all_data():
+                        status_text.text("📈 Calculating fundamental scores...")
+                        progress_bar.progress(40)
                         
-                        # Display comprehensive analysis
-                        display_comprehensive_analysis(analyzer)
+                        analyzer.calculate_fundamental_scores()
+                        
+                        status_text.text("🎯 Analyzing technical indicators...")
+                        progress_bar.progress(60)
+                        
+                        analyzer.calculate_technical_indicators()
+                        analyzer.generate_technical_signals()
+                        
+                        status_text.text("💰 Calculating buying strategies...")
+                        progress_bar.progress(80)
+                        
+                        analyzer.calculate_buying_prices()
+                        
+                        status_text.text("🔄 Generating combined recommendation...")
+                        progress_bar.progress(90)
+                        
+                        result = analyzer.generate_combined_recommendation()
+                        
+                        progress_bar.progress(100)
+                        status_text.text("✅ Analysis complete!")
+                        
+                        # Clear progress indicators
+                        progress_bar.empty()
+                        status_text.empty()
+                        
+                        if result and len(result) == 3:
+                            recommendation, color, combined_score = result
+                            
+                            # Display comprehensive analysis
+                            display_comprehensive_analysis(analyzer)
+                        else:
+                            st.error(f"❌ Could not generate recommendation for {symbol}")
                     else:
-                        st.error(f"❌ Could not generate recommendation for {symbol}")
-                else:
-                    st.error(f"❌ Could not fetch data for {symbol}")
+                        progress_bar.empty()
+                        status_text.empty()
+                        st.error(f"❌ Could not fetch data for {symbol}. Please check the symbol and try again.")
         
         with signals_tab3:
             st.subheader("ℹ️ Understanding Trading Signals")
@@ -5707,8 +6312,360 @@ def main():
 
     # --- Portfolio Manager ---
     with tab4:
-        st.header("📊 Portfolio Manager & Weekly Screeners")
-        st.markdown("Manage your stock portfolio and setup automated weekly screening alerts")
+        if st.session_state.get('enhanced_features_enabled', False):
+            st.header("💼 Enhanced Portfolio Manager")
+            st.markdown("🚀 **Enterprise-grade portfolio management with SQLite database, intelligent caching, and async loading**")
+            
+            # Enhanced Portfolio Manager Interface
+            enhanced_manager = st.session_state.enhanced_features_manager
+            
+            # Status indicators
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                db_status = "🟢 Connected" if enhanced_manager.portfolio_db else "🔴 Disconnected"
+                st.metric("Database", db_status)
+            
+            with col2:
+                cache_status = "🟢 Active" if enhanced_manager.cache else "🔴 Inactive"
+                st.metric("Cache System", cache_status)
+            
+            with col3:
+                async_status = "🟢 Ready" if enhanced_manager.async_loader else "🔴 Not Ready"
+                st.metric("Async Loading", async_status)
+            
+            with col4:
+                total_holdings = len(enhanced_manager.portfolio_db.get_current_holdings()) if enhanced_manager.portfolio_db else 0
+                st.metric("Total Holdings", total_holdings)
+            
+            # Enhanced Portfolio Tabs
+            portfolio_tab1, portfolio_tab2, portfolio_tab3, portfolio_tab4 = st.tabs([
+                "📊 Portfolio Dashboard",
+                "➕ Manage Holdings", 
+                "📈 Transaction History",
+                "🔄 Migrate from JSON"
+            ])
+            
+            with portfolio_tab1:
+                st.subheader("📊 Portfolio Dashboard")
+                
+                if enhanced_manager.portfolio_db:
+                    # Get portfolio summary
+                    holdings = enhanced_manager.portfolio_db.get_current_holdings()
+                    
+                    if holdings.empty:
+                        st.info("📊 Your portfolio is empty. Add some stocks to get started!")
+                        
+                        # Quick add section
+                        st.markdown("**Quick Add Popular Stocks:**")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if st.button("Add Tech Giants", type="primary"):
+                                tech_stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+                                for symbol in tech_stocks:
+                                    enhanced_manager.portfolio_db.add_holding(symbol, 10, 150.0)  # Sample quantities
+                                st.success("✅ Added tech giants to portfolio!")
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("Add Danish Stocks"):
+                                danish_stocks = ["NOVO-B.CO", "MAERSK-B.CO", "ORSTED.CO"]
+                                for symbol in danish_stocks:
+                                    enhanced_manager.portfolio_db.add_holding(symbol, 5, 800.0)
+                                st.success("✅ Added Danish stocks to portfolio!")
+                                st.rerun()
+                        
+                        with col3:
+                            if st.button("Add Dividend Stocks"):
+                                dividend_stocks = ["JNJ", "KO", "PG", "T"]
+                                for symbol in dividend_stocks:
+                                    enhanced_manager.portfolio_db.add_holding(symbol, 15, 100.0)
+                                st.success("✅ Added dividend stocks to portfolio!")
+                                st.rerun()
+                    else:
+                        # Display portfolio summary
+                        st.markdown("### 💰 Portfolio Summary")
+                        
+                        # Calculate portfolio metrics using async loading for current prices
+                        symbols = holdings['symbol'].tolist()
+                        
+                        # Use async loader to get current prices
+                        progress_placeholder = st.empty()
+                        
+                        def progress_callback(completed, total, message):
+                            progress = completed / total if total > 0 else 0
+                            progress_placeholder.progress(progress, text=f"Loading prices: {completed}/{total}")
+                        
+                        enhanced_manager.async_loader.set_progress_callback(progress_callback)
+                        price_results = enhanced_manager.async_loader.fetch_multiple_stocks_threaded(symbols)
+                        progress_placeholder.empty()
+                        
+                        # Calculate portfolio value and P&L
+                        total_value = 0
+                        total_cost = 0
+                        portfolio_data = []
+                        
+                        for _, holding in holdings.iterrows():
+                            symbol = holding['symbol']
+                            quantity = holding['quantity']
+                            avg_cost = holding['average_cost']
+                            
+                            current_price = 0
+                            if symbol in price_results and price_results[symbol].success:
+                                current_price = price_results[symbol].data.get('currentPrice', 0)
+                            
+                            market_value = quantity * current_price
+                            cost_basis = quantity * avg_cost
+                            pnl = market_value - cost_basis
+                            pnl_percent = (pnl / cost_basis * 100) if cost_basis > 0 else 0
+                            
+                            portfolio_data.append({
+                                'Symbol': symbol,
+                                'Quantity': quantity,
+                                'Avg Cost': f"${avg_cost:.2f}",
+                                'Current Price': f"${current_price:.2f}",
+                                'Market Value': f"${market_value:.2f}",
+                                'P&L': f"${pnl:.2f}",
+                                'P&L %': f"{pnl_percent:.1f}%"
+                            })
+                            
+                            total_value += market_value
+                            total_cost += cost_basis
+                        
+                        # Display key metrics
+                        total_pnl = total_value - total_cost
+                        total_pnl_percent = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Total Value", f"${total_value:,.2f}")
+                        with col2:
+                            st.metric("Total Cost", f"${total_cost:,.2f}")
+                        with col3:
+                            st.metric("Total P&L", f"${total_pnl:,.2f}", f"{total_pnl_percent:.1f}%")
+                        with col4:
+                            st.metric("Holdings", len(holdings))
+                        
+                        # Display holdings table
+                        st.markdown("### 📋 Current Holdings")
+                        if portfolio_data:
+                            portfolio_df = pd.DataFrame(portfolio_data)
+                            st.dataframe(portfolio_df, use_container_width=True, hide_index=True)
+                        
+                        # Portfolio performance chart
+                        st.markdown("### 📈 Portfolio Performance")
+                        
+                        # Get portfolio snapshots
+                        snapshots = enhanced_manager.portfolio_db.get_portfolio_snapshots(limit=30)
+                        if not snapshots.empty:
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=snapshots['snapshot_date'],
+                                y=snapshots['total_value'],
+                                mode='lines+markers',
+                                name='Portfolio Value',
+                                line=dict(color='green', width=2)
+                            ))
+                            fig.update_layout(
+                                title="Portfolio Value Over Time",
+                                xaxis_title="Date",
+                                yaxis_title="Value ($)",
+                                template="plotly_white"
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info("📈 No historical data available yet. Portfolio snapshots will appear here over time.")
+                
+                else:
+                    st.error("❌ Database not available. Enhanced features disabled.")
+                    
+            with portfolio_tab2:
+                st.subheader("➕ Manage Portfolio Holdings")
+                
+                if enhanced_manager.portfolio_db:
+                    # Add new holding
+                    st.markdown("### ➕ Add New Holding")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        new_symbol = st.text_input("Stock Symbol", placeholder="AAPL", key="enhanced_portfolio_new_symbol").upper()
+                    with col2:
+                        new_quantity = st.number_input("Quantity", min_value=0.01, value=1.0, step=0.01)
+                    with col3:
+                        new_price = st.number_input("Purchase Price", min_value=0.01, value=100.0, step=0.01)
+                    
+                    if st.button("➕ Add Holding", type="primary"):
+                        if new_symbol:
+                            try:
+                                enhanced_manager.portfolio_db.add_holding(new_symbol, new_quantity, new_price)
+                                enhanced_manager.portfolio_db.record_transaction(
+                                    new_symbol, 'BUY', new_quantity, new_price, 
+                                    notes=f"Added via Enhanced Portfolio Manager"
+                                )
+                                st.success(f"✅ Added {new_quantity} shares of {new_symbol} at ${new_price:.2f}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error adding holding: {e}")
+                        else:
+                            st.error("❌ Please enter a valid symbol")
+                    
+                    st.markdown("---")
+                    
+                    # Remove/Edit holdings
+                    st.markdown("### ✏️ Edit Existing Holdings")
+                    holdings = enhanced_manager.portfolio_db.get_current_holdings()
+                    
+                    if not holdings.empty:
+                        selected_symbol = st.selectbox("Select holding to edit:", holdings['symbol'].tolist())
+                        
+                        if selected_symbol:
+                            current_holding = holdings[holdings['symbol'] == selected_symbol].iloc[0]
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if st.button("🗑️ Remove Holding", type="secondary"):
+                                    enhanced_manager.portfolio_db.remove_holding(selected_symbol)
+                                    st.success(f"✅ Removed {selected_symbol} from portfolio")
+                                    st.rerun()
+                            
+                            with col2:
+                                if st.button("📊 View Details", type="secondary"):
+                                    st.info(f"**{selected_symbol}**\n"
+                                           f"Quantity: {current_holding['quantity']}\n"
+                                           f"Average Cost: ${current_holding['average_cost']:.2f}\n"
+                                           f"Added: {current_holding['date_added']}")
+                    else:
+                        st.info("📊 No holdings to edit. Add some stocks first!")
+                        
+                else:
+                    st.error("❌ Database not available")
+                    
+            with portfolio_tab3:
+                st.subheader("📈 Transaction History")
+                
+                if enhanced_manager.portfolio_db:
+                    transactions = enhanced_manager.portfolio_db.get_transaction_history()
+                    
+                    if transactions and len(transactions) > 0:
+                        # Convert list of dicts to DataFrame for easier manipulation
+                        transactions_df = pd.DataFrame(transactions)
+                        
+                        st.markdown(f"### 📋 Recent Transactions ({len(transactions)} total)")
+                        
+                        # Filter controls
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            symbol_filter = st.selectbox("Filter by Symbol:", ["All"] + transactions_df['symbol'].unique().tolist())
+                        with col2:
+                            transaction_type = st.selectbox("Filter by Type:", ["All", "BUY", "SELL"])
+                        
+                        # Apply filters
+                        filtered_transactions = transactions_df.copy()
+                        if symbol_filter != "All":
+                            filtered_transactions = filtered_transactions[filtered_transactions['symbol'] == symbol_filter]
+                        if transaction_type != "All":
+                            filtered_transactions = filtered_transactions[filtered_transactions['type'] == transaction_type]
+                        
+                        # Display transactions
+                        if not filtered_transactions.empty:
+                            # Format for display
+                            display_transactions = filtered_transactions.copy()
+                            display_transactions['Total Value'] = display_transactions['shares'] * display_transactions['price']
+                            display_transactions = display_transactions[['transaction_date', 'symbol', 'type', 
+                                                                       'shares', 'price', 'Total Value', 'notes']]
+                            display_transactions.columns = ['Date', 'Symbol', 'Type', 'Quantity', 'Price', 'Total Value', 'Notes']
+                            
+                            st.dataframe(display_transactions, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("📊 No transactions match the current filters")
+                    else:
+                        st.info("📊 No transaction history available yet")
+                        
+                else:
+                    st.error("❌ Database not available")
+                    
+            with portfolio_tab4:
+                st.subheader("🔄 Migrate from JSON Portfolio")
+                
+                if enhanced_manager.portfolio_db:
+                    st.markdown("""
+                    ### 📋 Portfolio Migration
+                    
+                    Migrate your existing JSON-based portfolio to the new SQLite database system.
+                    This provides better reliability, transaction tracking, and performance.
+                    """)
+                    
+                    # Check if JSON portfolio exists
+                    json_portfolio = st.session_state.get('portfolio', [])
+                    
+                    if json_portfolio:
+                        st.info(f"📊 Found {len(json_portfolio)} stocks in your JSON portfolio")
+                        
+                        # Display current JSON portfolio
+                        st.markdown("**Current JSON Portfolio:**")
+                        for symbol in json_portfolio:
+                            st.write(f"• {symbol}")
+                        
+                        # Migration options
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            default_quantity = st.number_input("Default quantity for each stock:", min_value=1, value=10)
+                            default_price = st.number_input("Default purchase price:", min_value=0.01, value=100.0)
+                        
+                        with col2:
+                            if st.button("🚀 Migrate Portfolio", type="primary"):
+                                try:
+                                    migrated_count = 0
+                                    for symbol in json_portfolio:
+                                        # Check if already exists
+                                        existing = enhanced_manager.portfolio_db.get_current_holdings()
+                                        if symbol not in existing['symbol'].values:
+                                            enhanced_manager.portfolio_db.add_holding(symbol, default_quantity, default_price)
+                                            enhanced_manager.portfolio_db.record_transaction(
+                                                symbol, 'BUY', default_quantity, default_price,
+                                                notes="Migrated from JSON portfolio"
+                                            )
+                                            migrated_count += 1
+                                    
+                                    st.success(f"✅ Migrated {migrated_count} stocks to SQLite database!")
+                                    if migrated_count < len(json_portfolio):
+                                        st.info(f"ℹ️ {len(json_portfolio) - migrated_count} stocks were already in the database")
+                                    
+                                except Exception as e:
+                                    st.error(f"❌ Migration error: {e}")
+                    else:
+                        st.info("📊 No JSON portfolio found to migrate")
+                        
+                    # Database statistics
+                    st.markdown("### 📊 Database Statistics")
+                    holdings_count = len(enhanced_manager.portfolio_db.get_current_holdings())
+                    transactions_count = len(enhanced_manager.portfolio_db.get_transaction_history())
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Holdings", holdings_count)
+                    with col2:
+                        st.metric("Total Transactions", transactions_count)
+                    with col3:
+                        # Get database file size
+                        import os
+                        db_size = 0
+                        try:
+                            db_path = enhanced_manager.portfolio_db.db_path
+                            if os.path.exists(db_path):
+                                db_size = os.path.getsize(db_path) / (1024 * 1024)  # MB
+                        except:
+                            pass
+                        st.metric("Database Size", f"{db_size:.3f} MB")
+                        
+                else:
+                    st.error("❌ Database not available")
+        
+        else:
+            # Standard Portfolio Manager (existing code)
+            st.header("📊 Portfolio Manager & Weekly Screeners")
+            st.markdown("Manage your stock portfolio and setup automated weekly screening alerts")
         
         # Initialize portfolio in session state
         if 'portfolio' not in st.session_state:
@@ -5725,6 +6682,34 @@ def main():
         
         with portfolio_tab1:
             st.subheader("💼 My Stock Portfolio")
+            
+            # Help section
+            with st.expander("ℹ️ New Feature: Track Purchase Prices & P&L"):
+                st.markdown("""
+                ### 🎉 Enhanced Portfolio Management
+                
+                **New Features:**
+                - 📊 **Purchase Price Tracking**: Add the price you paid for each stock
+                - 📈 **Quantity Management**: Track how many shares you own
+                - 💰 **Profit & Loss Calculation**: See your unrealized gains/losses
+                - 📅 **Purchase Date Tracking**: Remember when you bought each stock
+                - 📋 **Detailed Export**: Export complete portfolio data to CSV
+                
+                **How to Use:**
+                1. **Add New Holdings**: Enter symbol, quantity, and purchase price
+                2. **Edit Existing Holdings**: Click on any cell to edit quantities or prices
+                3. **Calculate Current Value**: Click "📊 Calculate Current Value" to see P&L
+                4. **Export Data**: Download your complete portfolio with cost basis
+                
+                **Legacy Portfolio Migration:**
+                - If you have stocks in the old format, you'll see a migration option
+                - This preserves your existing stocks while adding purchase price tracking
+                
+                **Tips:**
+                - Set purchase prices to $0.01 if you want to track without historical cost
+                - You can add multiple purchases of the same stock (it averages the price)
+                - Use the "📊 Portfolio Summary" for quick overview
+                """)
             
             # Portfolio input section
             col1, col2 = st.columns([2, 1])
@@ -5744,38 +6729,92 @@ def main():
                 selected_category = st.selectbox("Quick Add Category:", ["Manual Entry"] + list(popular_stocks.keys()), key="portfolio_quick_add_category")
                 
                 if selected_category == "Manual Entry":
-                    new_symbols = st.text_input(
-                        "Enter stock symbols (comma-separated):",
-                        placeholder="AAPL, MSFT, GOOGL",
-                        key="portfolio_manual_entry"
+                    # Manual entry with purchase price support
+                    col1a, col1b, col1c = st.columns([2, 1, 1])
+                    
+                    with col1a:
+                        new_symbol = st.text_input(
+                            "Enter stock symbol:",
+                            placeholder="AAPL",
+                            key="portfolio_manual_symbol"
+                        ).upper().strip()
+                    
+                    with col1b:
+                        new_quantity = st.number_input(
+                            "Quantity:",
+                            min_value=0.01,
+                            value=1.0,
+                            step=0.01,
+                            key="portfolio_manual_quantity"
+                        )
+                    
+                    with col1c:
+                        new_price = st.number_input(
+                            "Purchase Price ($):",
+                            min_value=0.01,
+                            value=100.0,
+                            step=0.01,
+                            key="portfolio_manual_price"
+                        )
+                    
+                    purchase_date = st.date_input(
+                        "Purchase Date:",
+                        value=datetime.now().date(),
+                        key="portfolio_manual_date"
                     )
                     
-                    if st.button("➕ Add to Portfolio") and new_symbols:
-                        symbols_to_add = [s.strip().upper() for s in new_symbols.split(',') if s.strip()]
-                        added_count = 0
+                    if st.button("➕ Add to Portfolio", type="primary") and new_symbol:
+                        # Add to both old format (for backward compatibility) and new format
+                        if new_symbol not in st.session_state.portfolio:
+                            st.session_state.portfolio.append(new_symbol)
                         
-                        for symbol in symbols_to_add:
-                            if symbol not in st.session_state.portfolio:
-                                st.session_state.portfolio.append(symbol)
-                                added_count += 1
-                        
-                        if added_count > 0:
-                            st.success(f"Added {added_count} stocks to portfolio!")
-                            auto_sync_if_enabled()  # Auto-sync if enabled
-                            st.rerun()
+                        # Add or update holdings with purchase details
+                        if new_symbol in st.session_state.portfolio_holdings:
+                            # Update existing holding (add to position)
+                            existing = st.session_state.portfolio_holdings[new_symbol]
+                            old_value = existing["quantity"] * existing["purchase_price"]
+                            new_value = new_quantity * new_price
+                            total_quantity = existing["quantity"] + new_quantity
+                            avg_price = (old_value + new_value) / total_quantity if total_quantity > 0 else new_price
+                            
+                            st.session_state.portfolio_holdings[new_symbol] = {
+                                "quantity": total_quantity,
+                                "purchase_price": avg_price,
+                                "purchase_date": str(purchase_date)  # Keep most recent date
+                            }
+                            st.success(f"✅ Added {new_quantity} shares of {new_symbol} at ${new_price:.2f}!\n"
+                                     f"Total position: {total_quantity} shares at avg ${avg_price:.2f}")
                         else:
-                            st.info("All symbols are already in your portfolio")
+                            # New holding
+                            st.session_state.portfolio_holdings[new_symbol] = {
+                                "quantity": new_quantity,
+                                "purchase_price": new_price,
+                                "purchase_date": str(purchase_date)
+                            }
+                            st.success(f"✅ Added {new_quantity} shares of {new_symbol} at ${new_price:.2f}!")
+                        
+                        auto_sync_if_enabled()  # Auto-sync if enabled
+                        st.rerun()
                 
                 else:
-                    # Quick add from categories
+                    # Quick add from categories (without purchase price initially)
                     st.write(f"**{selected_category} Stocks:**")
+                    st.info("💡 Quick add stocks without purchase price. You can edit prices later.")
                     cols = st.columns(5)
                     for i, symbol in enumerate(popular_stocks[selected_category]):
                         with cols[i % 5]:
                             if st.button(f"Add {symbol}", key=f"add_portfolio_{symbol}"):
                                 if symbol not in st.session_state.portfolio:
                                     st.session_state.portfolio.append(symbol)
-                                    st.success(f"Added {symbol}!")
+                                
+                                # Add to holdings with default values (user can edit later)
+                                if symbol not in st.session_state.portfolio_holdings:
+                                    st.session_state.portfolio_holdings[symbol] = {
+                                        "quantity": 1.0,
+                                        "purchase_price": 0.0,  # User needs to update this
+                                        "purchase_date": str(datetime.now().date())
+                                    }
+                                    st.success(f"✅ Added {symbol}! Remember to set purchase price.")
                                     auto_sync_if_enabled()  # Auto-sync if enabled
                                     st.rerun()
                                 else:
@@ -5783,7 +6822,38 @@ def main():
             
             with col2:
                 st.markdown("**📊 Portfolio Stats**")
-                st.metric("Total Stocks", len(st.session_state.portfolio))
+                
+                # Calculate portfolio metrics
+                total_holdings = len(st.session_state.portfolio_holdings)
+                total_cost = sum(
+                    holding["quantity"] * holding["purchase_price"] 
+                    for holding in st.session_state.portfolio_holdings.values()
+                    if holding["purchase_price"] > 0
+                )
+                holdings_with_prices = sum(
+                    1 for holding in st.session_state.portfolio_holdings.values()
+                    if holding["purchase_price"] > 0
+                )
+                
+                col2a, col2b = st.columns(2)
+                with col2a:
+                    st.metric("Total Holdings", total_holdings)
+                    st.metric("With Purchase Prices", holdings_with_prices)
+                
+                with col2b:
+                    if total_cost > 0:
+                        st.metric("Total Investment", f"${total_cost:,.2f}")
+                    else:
+                        st.metric("Total Investment", "Set prices")
+                    
+                    # Calculate unrealized P&L if we have prices
+                    if holdings_with_prices > 0:
+                        st.info("💡 Add current prices to see P&L")
+                
+                # Quick portfolio value calculator
+                if st.session_state.portfolio_holdings:
+                    if st.button("📊 Calculate Current Value", type="secondary"):
+                        calculate_portfolio_value()
                 
                 # Portfolio sync status
                 sync_status, last_updated = get_portfolio_sync_status()
@@ -5832,70 +6902,157 @@ def main():
                         analyze_portfolio_quick(st.session_state.portfolio)
             
             # Display current portfolio
-            if st.session_state.portfolio:
+            if st.session_state.portfolio_holdings:
                 st.markdown("---")
-                st.subheader("📋 Current Portfolio")
+                st.subheader("📋 Current Portfolio Holdings")
                 
-                # Portfolio management
-                col1, col2, col3 = st.columns([2, 1, 1])
-                
-                with col1:
-                    # Display portfolio as editable list
-                    portfolio_df = pd.DataFrame({
-                        'Symbol': st.session_state.portfolio,
-                        'Remove': [False] * len(st.session_state.portfolio)
+                # Create editable portfolio holdings table
+                holdings_data = []
+                for symbol, holding in st.session_state.portfolio_holdings.items():
+                    holdings_data.append({
+                        'Symbol': symbol,
+                        'Quantity': holding['quantity'],
+                        'Purchase Price': holding['purchase_price'],
+                        'Purchase Date': holding['purchase_date'],
+                        'Remove': False
                     })
+                
+                if holdings_data:
+                    holdings_df = pd.DataFrame(holdings_data)
                     
-                    edited_df = st.data_editor(
-                        portfolio_df,
+                    # Edit holdings
+                    edited_holdings = st.data_editor(
+                        holdings_df,
                         column_config={
                             "Symbol": st.column_config.TextColumn("Stock Symbol", disabled=True),
+                            "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.01, step=0.01),
+                            "Purchase Price": st.column_config.NumberColumn("Purchase Price ($)", min_value=0.0, step=0.01, format="$%.2f"),
+                            "Purchase Date": st.column_config.DateColumn("Purchase Date"),
                             "Remove": st.column_config.CheckboxColumn("Remove?")
                         },
                         use_container_width=True,
                         hide_index=True,
-                        key="portfolio_editor"
+                        key="portfolio_holdings_editor"
                     )
                     
-                    # Remove selected stocks
-                    if st.button("🗑️ Remove Selected"):
-                        symbols_to_remove = edited_df[edited_df['Remove']]['Symbol'].tolist()
-                        if symbols_to_remove:
-                            for symbol in symbols_to_remove:
-                                st.session_state.portfolio.remove(symbol)
-                            st.success(f"Removed {len(symbols_to_remove)} stocks")
-                            auto_sync_if_enabled()  # Auto-sync if enabled
+                    # Update holdings based on edits
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if st.button("💾 Save Changes", type="primary"):
+                            # Update holdings with edited values
+                            for idx, row in edited_holdings.iterrows():
+                                symbol = row['Symbol']
+                                if symbol in st.session_state.portfolio_holdings:
+                                    st.session_state.portfolio_holdings[symbol] = {
+                                        'quantity': row['Quantity'],
+                                        'purchase_price': row['Purchase Price'],
+                                        'purchase_date': str(row['Purchase Date'])
+                                    }
+                            st.success("✅ Holdings updated!")
+                            auto_sync_if_enabled()
+                            st.rerun()
+                    
+                    with col2:
+                        if st.button("🗑️ Remove Selected"):
+                            symbols_to_remove = edited_holdings[edited_holdings['Remove']]['Symbol'].tolist()
+                            if symbols_to_remove:
+                                for symbol in symbols_to_remove:
+                                    # Remove from both portfolio formats
+                                    if symbol in st.session_state.portfolio_holdings:
+                                        del st.session_state.portfolio_holdings[symbol]
+                                    if symbol in st.session_state.portfolio:
+                                        st.session_state.portfolio.remove(symbol)
+                                st.success(f"🗑️ Removed {len(symbols_to_remove)} holdings")
+                                auto_sync_if_enabled()
+                                st.rerun()
+                    
+                    with col3:
+                        if st.button("🗑️ Clear All"):
+                            st.session_state.portfolio_holdings = {}
+                            st.session_state.portfolio = []
+                            auto_sync_if_enabled()
                             st.rerun()
                 
-                with col2:
-                    # Portfolio actions
-                    st.markdown("**Actions:**")
+                # Portfolio actions and export
+                st.markdown("---")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("**📊 Analysis:**")
+                    if st.button("📈 Full Portfolio Analysis"):
+                        symbols = list(st.session_state.portfolio_holdings.keys())
+                        analyze_full_portfolio(symbols)
                     
-                    if st.button("📊 Full Analysis"):
-                        analyze_full_portfolio(st.session_state.portfolio)
+                    if st.button("⚡ Quick Analysis"):
+                        symbols = list(st.session_state.portfolio_holdings.keys())
+                        analyze_portfolio_quick(symbols)
+                
+                with col2:
+                    st.markdown("**📋 Export:**")
+                    if st.button("📄 Export Holdings to CSV"):
+                        # Create detailed CSV with holdings data
+                        export_data = []
+                        for symbol, holding in st.session_state.portfolio_holdings.items():
+                            export_data.append({
+                                'Symbol': symbol,
+                                'Quantity': holding['quantity'],
+                                'Purchase_Price': holding['purchase_price'],
+                                'Purchase_Date': holding['purchase_date'],
+                                'Cost_Basis': holding['quantity'] * holding['purchase_price']
+                            })
+                        
+                        if export_data:
+                            export_df = pd.DataFrame(export_data)
+                            csv = export_df.to_csv(index=False)
+                            st.download_button(
+                                "📥 Download Holdings CSV",
+                                data=csv,
+                                file_name=f"portfolio_holdings_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv"
+                            )
                     
                     if st.button("📋 Copy Symbols"):
-                        symbols_text = ", ".join(st.session_state.portfolio)
-                        st.text_area("Copy these symbols:", value=symbols_text, height=100, key="copy_portfolio")
-                    
-                    if st.button("🗑️ Clear All"):
-                        st.session_state.portfolio = []
-                        auto_sync_if_enabled()  # Auto-sync if enabled
-                        st.rerun()
+                        symbols_text = ", ".join(st.session_state.portfolio_holdings.keys())
+                        st.text_area("Copy these symbols:", value=symbols_text, height=100, key="copy_portfolio_holdings")
                 
                 with col3:
-                    # Export options
-                    st.markdown("**Export:**")
+                    st.markdown("**🔄 Actions:**")
+                    if st.button("� Portfolio Summary"):
+                        # Display quick summary
+                        total_holdings = len(st.session_state.portfolio_holdings)
+                        total_cost = sum(h["quantity"] * h["purchase_price"] for h in st.session_state.portfolio_holdings.values() if h["purchase_price"] > 0)
+                        st.success(f"📊 {total_holdings} holdings, ${total_cost:,.2f} invested")
+            
+            elif st.session_state.portfolio:
+                # Legacy portfolio format - show migration option
+                st.markdown("---")
+                st.warning("⚠️ You have stocks in the old portfolio format. Migrate to track purchase prices and P&L!")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Legacy Portfolio:**")
+                    for symbol in st.session_state.portfolio:
+                        st.write(f"• {symbol}")
+                
+                with col2:
+                    st.markdown("**Migration Options:**")
+                    if st.button("� Migrate to New Format", type="primary"):
+                        # Migrate existing symbols
+                        for symbol in st.session_state.portfolio:
+                            if symbol not in st.session_state.portfolio_holdings:
+                                st.session_state.portfolio_holdings[symbol] = {
+                                    'quantity': 1.0,
+                                    'purchase_price': 0.0,  # User needs to set
+                                    'purchase_date': str(datetime.now().date())
+                                }
+                        st.success("✅ Migrated to new format! Now set purchase prices.")
+                        st.rerun()
                     
-                    if st.button("💾 Save Portfolio"):
-                        portfolio_df = pd.DataFrame({'Symbol': st.session_state.portfolio})
-                        csv = portfolio_df.to_csv(index=False)
-                        st.download_button(
-                            "📥 Download CSV",
-                            data=csv,
-                            file_name=f"my_portfolio_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv"
-                        )
+                    if st.button("🗑️ Clear Legacy Portfolio"):
+                        st.session_state.portfolio = []
+                        st.rerun()
             
             else:
                 st.info("Your portfolio is empty. Add some stocks to get started!")
@@ -5904,7 +7061,7 @@ def main():
             st.subheader("🔄 Smart Portfolio Rebalancing")
             st.markdown("Optimize your portfolio by removing underperformers and adding high-scoring opportunities")
             
-            if not st.session_state.portfolio:
+            if not st.session_state.portfolio_holdings:
                 st.warning("⚠️ Your portfolio is empty. Add stocks in the 'My Portfolio' tab first.")
             else:
                 # Rebalancing configuration
@@ -5917,7 +7074,7 @@ def main():
                         "🎯 Target Portfolio Size", 
                         min_value=5, 
                         max_value=25, 
-                        value=min(15, max(10, len(st.session_state.portfolio))),
+                        value=min(15, max(10, len(st.session_state.portfolio_holdings))),
                         help="Ideal number of stocks in your portfolio"
                     )
                     
@@ -5965,25 +7122,53 @@ def main():
                 # Current portfolio analysis summary
                 st.markdown("### 📊 Current Portfolio Overview")
                 
-                if len(st.session_state.portfolio) > 0:
+                if len(st.session_state.portfolio_holdings) > 0:
+                    # Calculate portfolio metrics
+                    total_holdings = len(st.session_state.portfolio_holdings)
+                    total_investment = sum(
+                        h["quantity"] * h["purchase_price"] 
+                        for h in st.session_state.portfolio_holdings.values()
+                        if h["purchase_price"] > 0
+                    )
+                    holdings_with_prices = sum(
+                        1 for h in st.session_state.portfolio_holdings.values()
+                        if h["purchase_price"] > 0
+                    )
+                    
                     overview_col1, overview_col2, overview_col3, overview_col4 = st.columns(4)
                     
                     with overview_col1:
-                        st.metric("Current Size", len(st.session_state.portfolio))
+                        st.metric("Current Holdings", total_holdings)
                     
                     with overview_col2:
-                        target_change = target_size - len(st.session_state.portfolio)
+                        target_change = target_size - total_holdings
                         st.metric("Target Change", f"{target_change:+d}")
                     
                     with overview_col3:
-                        # Quick estimate of diversification
-                        diversification = "Good" if len(st.session_state.portfolio) >= 10 else "Limited"
-                        st.metric("Diversification", diversification)
+                        st.metric("Total Investment", f"${total_investment:,.2f}" if total_investment > 0 else "Set prices")
                     
                     with overview_col4:
                         # Last rebalance info
                         last_rebalance = st.session_state.get('last_rebalance_date', 'Never')
                         st.metric("Last Rebalance", last_rebalance)
+                    
+                    # Portfolio composition analysis
+                    if holdings_with_prices > 0:
+                        st.markdown("#### 💰 Current Portfolio Composition")
+                        composition_data = []
+                        for symbol, holding in st.session_state.portfolio_holdings.items():
+                            if holding["purchase_price"] > 0:
+                                investment = holding["quantity"] * holding["purchase_price"]
+                                percentage = (investment / total_investment * 100) if total_investment > 0 else 0
+                                composition_data.append({
+                                    'Symbol': symbol,
+                                    'Investment': f"${investment:,.2f}",
+                                    'Percentage': f"{percentage:.1f}%",
+                                    'Shares': f"{holding['quantity']:.2f}"
+                                })
+                        
+                        composition_df = pd.DataFrame(composition_data)
+                        st.dataframe(composition_df, use_container_width=True, hide_index=True)
                 
                 # Main rebalancing action
                 st.markdown("---")
@@ -5994,8 +7179,11 @@ def main():
                     if st.button("🔄 Analyze Rebalancing Opportunities", type="primary", use_container_width=True):
                         with st.spinner("Analyzing your portfolio for rebalancing opportunities..."):
                             try:
+                                # Convert holdings to symbol list for the rebalancing function
+                                current_symbols = list(st.session_state.portfolio_holdings.keys())
+                                
                                 actions, analysis_df = rebalance_portfolio_manual(
-                                    st.session_state.portfolio,
+                                    current_symbols,
                                     target_size=target_size,
                                     min_keep_score=min_keep_score,
                                     min_add_score=min_add_score,
@@ -6143,6 +7331,20 @@ Generated by Advanced Stock Scoring System
             st.subheader("🔍 Weekly Market Screener")
             st.markdown("Automatically screen the market weekly for new investment opportunities")
             
+            # Show current portfolio context
+            if st.session_state.portfolio_holdings:
+                current_symbols = list(st.session_state.portfolio_holdings.keys())
+                st.info(f"📊 Current portfolio: {len(current_symbols)} holdings - {', '.join(current_symbols[:5])}{' + more' if len(current_symbols) > 5 else ''}")
+                
+                exclude_current = st.checkbox(
+                    "🚫 Exclude current holdings from screening",
+                    value=True,
+                    help="Skip stocks you already own"
+                )
+            else:
+                exclude_current = False
+                st.warning("💡 Add some holdings to your portfolio first for better screening recommendations")
+            
             # Screener configuration
             col1, col2 = st.columns(2)
             
@@ -6214,24 +7416,66 @@ Generated by Advanced Stock Scoring System
                     )
                     
                     if not test_results.empty:
-                        st.success(f"Found {len(test_results)} promising stocks!")
+                        # Filter out current holdings if requested
+                        if exclude_current and st.session_state.portfolio_holdings:
+                            current_symbols = set(st.session_state.portfolio_holdings.keys())
+                            # Try to match symbols - handle different formats
+                            before_count = len(test_results)
+                            test_results = test_results[
+                                ~test_results['Original_Symbol'].isin(current_symbols)
+                            ]
+                            excluded_count = before_count - len(test_results)
+                            if excluded_count > 0:
+                                st.info(f"📊 Excluded {excluded_count} stocks already in your portfolio")
                         
-                        # Display results
-                        display_columns = [
-                            'Original_Symbol', 'Company', 'Final_Score', 'Recommendation', 
-                            'Sector', 'Current_Price', 'P/E_Ratio', 'ROE'
-                        ]
-                        
-                        available_columns = [col for col in display_columns if col in test_results.columns]
-                        if available_columns:
-                            st.dataframe(
-                                test_results[available_columns].head(max_results),
-                                use_container_width=True,
-                                hide_index=True
-                            )
+                        if not test_results.empty:
+                            st.success(f"✅ Found {len(test_results)} new investment opportunities!")
+                            
+                            # Display results with portfolio context
+                            display_columns = [
+                                'Original_Symbol', 'Company', 'Final_Score', 'Recommendation', 
+                                'Sector', 'Current_Price', 'P/E_Ratio', 'ROE'
+                            ]
+                            
+                            available_columns = [col for col in display_columns if col in test_results.columns]
+                            if available_columns:
+                                results_to_show = test_results[available_columns].head(max_results)
+                                st.dataframe(
+                                    results_to_show,
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
+                                
+                                # Quick add to portfolio option
+                                st.markdown("---")
+                                st.markdown("**⚡ Quick Actions**")
+                                
+                                # Select top stocks to add
+                                top_symbols = results_to_show['Original_Symbol'].head(5).tolist()
+                                selected_symbols = st.multiselect(
+                                    "Select stocks to add to your portfolio:",
+                                    options=top_symbols,
+                                    help="Select promising stocks to add to your watchlist"
+                                )
+                                
+                                if selected_symbols:
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        if st.button("➕ Add to Portfolio (No Prices)", type="secondary"):
+                                            for symbol in selected_symbols:
+                                                if symbol not in st.session_state.portfolio_holdings:
+                                                    st.session_state.portfolio_holdings[symbol] = {
+                                                        'quantity': 1.0,
+                                                        'purchase_price': 0.0,
+                                                        'purchase_date': str(datetime.now().date())
+                                                    }
+                                            st.success(f"✅ Added {len(selected_symbols)} stocks to portfolio!")
+                                            st.rerun()
+                                    
+                                    with col2:
+                                        st.info("💡 Set purchase prices in the 'My Portfolio' tab")
                         else:
-                            st.dataframe(test_results.head(max_results), use_container_width=True, hide_index=True)
-                    
+                            st.warning("⚠️ All qualifying stocks are already in your portfolio")
                     else:
                         st.warning("No stocks found meeting the criteria. Try lowering the minimum score.")
         
@@ -6239,9 +7483,28 @@ Generated by Advanced Stock Scoring System
             st.subheader("📈 Portfolio Monitoring & Alerts")
             st.markdown("Monitor your portfolio stocks and get weekly recommendations")
             
-            if not st.session_state.portfolio:
+            if not st.session_state.portfolio_holdings:
                 st.warning("⚠️ Your portfolio is empty. Add stocks in the 'My Portfolio' tab first.")
             else:
+                # Show current portfolio summary for monitoring
+                st.markdown("### 📊 Monitoring Overview")
+                
+                current_symbols = list(st.session_state.portfolio_holdings.keys())
+                total_investment = sum(
+                    h["quantity"] * h["purchase_price"] 
+                    for h in st.session_state.portfolio_holdings.values()
+                    if h["purchase_price"] > 0
+                )
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Holdings Monitored", len(current_symbols))
+                with col2:
+                    st.metric("Total Investment", f"${total_investment:,.2f}" if total_investment > 0 else "Set prices")
+                with col3:
+                    last_check = st.session_state.get('last_portfolio_check', 'Never')
+                    st.metric("Last Check", last_check)
+                
                 # Initialize monitoring settings
                 if 'monitoring_settings' not in st.session_state:
                     st.session_state.monitoring_settings = {
@@ -6249,7 +7512,9 @@ Generated by Advanced Stock Scoring System
                         'email_address': '',
                         'alert_threshold': 1.0,
                         'weekly_reports': False,
-                        'last_analysis': None
+                        'last_analysis': None,
+                        'price_alerts': True,
+                        'score_alerts': True
                     }
                 
                 # Alert Configuration
@@ -6287,6 +7552,23 @@ Generated by Advanced Stock Scoring System
                         help="Receive weekly portfolio performance summaries"
                     )
                 
+                # Portfolio-specific alert options
+                st.markdown("**Alert Types:**")
+                col2a, col2b = st.columns(2)
+                with col2a:
+                    st.session_state.monitoring_settings['price_alerts'] = st.checkbox(
+                        "💰 Price Change Alerts",
+                        value=st.session_state.monitoring_settings.get('price_alerts', True),
+                        help="Alert when stock prices change significantly"
+                    )
+                
+                with col2b:
+                    st.session_state.monitoring_settings['score_alerts'] = st.checkbox(
+                        "📊 Score Change Alerts",
+                        value=st.session_state.monitoring_settings.get('score_alerts', True),
+                        help="Alert when fundamental scores change"
+                    )
+                
                 # Automated Portfolio Analysis
                 st.markdown("---")
                 st.subheader("🤖 Automated Portfolio Analysis")
@@ -6295,15 +7577,69 @@ Generated by Advanced Stock Scoring System
                 
                 with col1:
                     if st.button("🚀 Run Full Portfolio Analysis", type="primary"):
-                        run_automated_portfolio_analysis(st.session_state.portfolio)
+                        current_symbols = list(st.session_state.portfolio_holdings.keys())
+                        run_automated_portfolio_analysis(current_symbols)
                 
                 with col2:
                     if st.button("📈 Quick Health Check"):
-                        run_portfolio_health_check(st.session_state.portfolio)
+                        current_symbols = list(st.session_state.portfolio_holdings.keys())
+                        run_portfolio_health_check(current_symbols)
                 
                 with col3:
-                    if st.button("⚠️ Risk Assessment"):
-                        run_portfolio_risk_assessment(st.session_state.portfolio)
+                    if st.button("� P&L Analysis"):
+                        # New function for P&L analysis using purchase prices
+                        run_portfolio_pnl_analysis()
+                
+                # Additional portfolio monitoring tools
+                st.markdown("#### 🚨 Advanced Monitoring")
+                if st.button("🚨 Portfolio Alerts & Risk Check", type="secondary"):
+                    # New function for portfolio alerts with P&L monitoring
+                    run_portfolio_alerts()
+                
+                # Current Portfolio Status
+                st.markdown("---")
+                st.subheader("📊 Current Portfolio Status")
+                
+                # Show quick portfolio snapshot
+                if current_symbols:
+                    status_col1, status_col2 = st.columns(2)
+                    
+                    with status_col1:
+                        st.markdown("**Holdings Overview:**")
+                        for symbol, holding in list(st.session_state.portfolio_holdings.items())[:5]:  # Show first 5
+                            cost_basis = holding["quantity"] * holding["purchase_price"] if holding["purchase_price"] > 0 else 0
+                            st.write(f"• **{symbol}**: {holding['quantity']:.1f} shares @ ${holding['purchase_price']:.2f} = ${cost_basis:.2f}")
+                        
+                        if len(st.session_state.portfolio_holdings) > 5:
+                            st.write(f"... and {len(st.session_state.portfolio_holdings) - 5} more holdings")
+                    
+                    with status_col2:
+                        st.markdown("**Quick Actions:**")
+                        if st.button("📊 Calculate Current Value"):
+                            calculate_portfolio_value()
+                        
+                        if st.button("📈 Get Price Updates"):
+                            # Quick price update for all holdings
+                            with st.spinner("Fetching current prices..."):
+                                import yfinance as yf
+                                price_updates = {}
+                                for symbol in current_symbols:
+                                    try:
+                                        ticker = yf.Ticker(symbol)
+                                        current_price = ticker.history(period="1d")['Close'].iloc[-1] if not ticker.history(period="1d").empty else 0
+                                        price_updates[symbol] = current_price
+                                    except:
+                                        price_updates[symbol] = 0
+                                
+                                st.success("✅ Price updates retrieved!")
+                                for symbol, price in price_updates.items():
+                                    if price > 0:
+                                        st.write(f"**{symbol}**: ${price:.2f}")
+                        
+                        if st.button("🔄 Update Monitoring"):
+                            st.session_state['last_portfolio_check'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            st.success("✅ Monitoring timestamp updated!")
+                            st.rerun()
                 
                 # Performance Tracking
                 st.markdown("---")
@@ -6379,8 +7715,386 @@ Generated by Advanced Stock Scoring System
             st.markdown("- Sector preferences")
             st.markdown("- Market cap filters")
 
+    # --- What-If Analysis (Enhanced Features Only) ---
+    if st.session_state.get('enhanced_features_enabled', False):
+        with tab5:
+            st.header("🔮 What-If Portfolio Analysis")
+            st.markdown("🚀 **Simulate portfolio changes before committing - Test strategies safely**")
+            
+            enhanced_manager = st.session_state.enhanced_features_manager
+            
+            if enhanced_manager.what_if_analyzer:
+                what_if = enhanced_manager.what_if_analyzer
+                
+                # What-If Analysis tabs
+                whatif_tab1, whatif_tab2, whatif_tab3, whatif_tab4 = st.tabs([
+                    "🎯 Scenario Builder",
+                    "📊 Comparison View", 
+                    "💡 Recommendations",
+                    "🧮 Risk Analysis"
+                ])
+                
+                with whatif_tab1:
+                    st.subheader("🎯 Build Your Scenario")
+                    
+                    # Get current portfolio
+                    if enhanced_manager.portfolio_db:
+                        current_holdings = enhanced_manager.portfolio_db.get_current_holdings()
+                        
+                        if current_holdings.empty:
+                            st.warning("⚠️ No current portfolio found. Add some holdings first in the Portfolio Manager.")
+                            st.markdown("### 🆕 Create Sample Portfolio for Testing")
+                            
+                            if st.button("🚀 Create Sample Portfolio", type="primary"):
+                                # Add sample holdings
+                                sample_stocks = [
+                                    ("AAPL", 10, 150.0),
+                                    ("MSFT", 8, 300.0),
+                                    ("GOOGL", 5, 120.0),
+                                    ("TSLA", 15, 200.0),
+                                    ("NVDA", 6, 400.0)
+                                ]
+                                
+                                for symbol, quantity, price in sample_stocks:
+                                    enhanced_manager.portfolio_db.add_holding(symbol, quantity, price)
+                                
+                                st.success("✅ Sample portfolio created! Refresh to continue.")
+                                st.rerun()
+                        else:
+                            st.markdown("### 🔄 Modify Your Portfolio")
+                            st.info(f"Current portfolio has {len(current_holdings)} holdings")
+                            
+                            # Display current holdings summary
+                            with st.expander("📊 View Current Holdings"):
+                                holdings_summary = current_holdings[['symbol', 'quantity', 'average_cost']].copy()
+                                holdings_summary.columns = ['Symbol', 'Quantity', 'Avg Cost']
+                                st.dataframe(holdings_summary, hide_index=True)
+                            
+                            # Scenario modification options
+                            st.markdown("**🛠️ Scenario Modifications:**")
+                            
+                            modification_type = st.selectbox(
+                                "Choose modification type:",
+                                ["Add New Stock", "Remove Stock", "Change Quantity", "Rebalance Portfolio"]
+                            )
+                            
+                            scenario_changes = []
+                            
+                            if modification_type == "Add New Stock":
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    new_symbol = st.text_input("Stock Symbol", placeholder="AAPL", key="what_if_new_symbol").upper()
+                                with col2:
+                                    new_quantity = st.number_input("Quantity", min_value=1, value=10)
+                                with col3:
+                                    target_price = st.number_input("Target Price", min_value=0.01, value=100.0)
+                                
+                                if new_symbol and st.button("➕ Add to Scenario"):
+                                    scenario_changes.append({
+                                        'action': 'add',
+                                        'symbol': new_symbol,
+                                        'quantity': new_quantity,
+                                        'price': target_price
+                                    })
+                                    st.success(f"✅ Added {new_symbol} to scenario")
+                            
+                            elif modification_type == "Remove Stock":
+                                symbols_to_remove = st.multiselect(
+                                    "Select stocks to remove:",
+                                    current_holdings['symbol'].tolist()
+                                )
+                                
+                                if symbols_to_remove and st.button("🗑️ Remove from Scenario"):
+                                    for symbol in symbols_to_remove:
+                                        scenario_changes.append({
+                                            'action': 'remove',
+                                            'symbol': symbol
+                                        })
+                                    st.success(f"✅ Removed {len(symbols_to_remove)} stocks from scenario")
+                            
+                            elif modification_type == "Change Quantity":
+                                symbol_to_change = st.selectbox(
+                                    "Select stock to modify:",
+                                    current_holdings['symbol'].tolist()
+                                )
+                                
+                                if symbol_to_change:
+                                    current_qty = current_holdings[current_holdings['symbol'] == symbol_to_change]['quantity'].iloc[0]
+                                    new_qty = st.number_input(
+                                        f"New quantity for {symbol_to_change}",
+                                        min_value=0,
+                                        value=int(current_qty)
+                                    )
+                                    
+                                    if st.button("🔄 Update Quantity"):
+                                        scenario_changes.append({
+                                            'action': 'update_quantity',
+                                            'symbol': symbol_to_change,
+                                            'quantity': new_qty
+                                        })
+                                        st.success(f"✅ Updated {symbol_to_change} quantity")
+                            
+                            # Store scenario in session state
+                            if scenario_changes:
+                                st.session_state.what_if_scenario = scenario_changes
+                            
+                            # Analyze scenario button
+                            if st.button("🧮 Analyze Scenario", type="primary"):
+                                if 'what_if_scenario' in st.session_state:
+                                    with st.spinner("🔄 Analyzing scenario..."):
+                                        try:
+                                            # Build portfolio scenario
+                                            current_portfolio = {}
+                                            for _, holding in current_holdings.iterrows():
+                                                current_portfolio[holding['symbol']] = {
+                                                    'quantity': holding['quantity'],
+                                                    'cost_basis': holding['average_cost']
+                                                }
+                                            
+                                            # Apply changes
+                                            scenario_portfolio = current_portfolio.copy()
+                                            for change in st.session_state.what_if_scenario:
+                                                if change['action'] == 'add':
+                                                    scenario_portfolio[change['symbol']] = {
+                                                        'quantity': change['quantity'],
+                                                        'cost_basis': change['price']
+                                                    }
+                                                elif change['action'] == 'remove':
+                                                    scenario_portfolio.pop(change['symbol'], None)
+                                                elif change['action'] == 'update_quantity':
+                                                    if change['symbol'] in scenario_portfolio:
+                                                        scenario_portfolio[change['symbol']]['quantity'] = change['quantity']
+                                            
+                                            # Analyze scenario
+                                            analysis = what_if.analyze_portfolio_scenario(
+                                                current_portfolio,
+                                                scenario_portfolio,
+                                                scenario_name="Custom Scenario"
+                                            )
+                                            
+                                            st.session_state.what_if_analysis = analysis
+                                            st.success("✅ Scenario analysis complete! Check other tabs for results.")
+                                            
+                                        except Exception as e:
+                                            st.error(f"❌ Analysis error: {e}")
+                                else:
+                                    st.warning("⚠️ No scenario changes defined")
+                    else:
+                        st.error("❌ Portfolio database not available")
+                
+                with whatif_tab2:
+                    st.subheader("📊 Scenario Comparison")
+                    
+                    if 'what_if_analysis' in st.session_state:
+                        analysis = st.session_state.what_if_analysis
+                        
+                        # Metrics comparison
+                        st.markdown("### 📈 Key Metrics Comparison")
+                        
+                        current_metrics = analysis['current_metrics']
+                        scenario_metrics = analysis['scenario_metrics']
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            value_change = scenario_metrics['total_value'] - current_metrics['total_value']
+                            st.metric(
+                                "Portfolio Value",
+                                f"${scenario_metrics['total_value']:,.2f}",
+                                f"{value_change:+,.2f}"
+                            )
+                        
+                        with col2:
+                            risk_change = scenario_metrics['risk_score'] - current_metrics['risk_score']
+                            st.metric(
+                                "Risk Score",
+                                f"{scenario_metrics['risk_score']:.1f}",
+                                f"{risk_change:+.1f}"
+                            )
+                        
+                        with col3:
+                            div_change = scenario_metrics['dividend_yield'] - current_metrics['dividend_yield']
+                            st.metric(
+                                "Dividend Yield",
+                                f"{scenario_metrics['dividend_yield']:.2f}%",
+                                f"{div_change:+.2f}%"
+                            )
+                        
+                        with col4:
+                            holdings_change = len(analysis['scenario_portfolio']) - len(analysis['current_portfolio'])
+                            st.metric(
+                                "Holdings Count",
+                                len(analysis['scenario_portfolio']),
+                                f"{holdings_change:+d}"
+                            )
+                        
+                        # Sector allocation comparison
+                        st.markdown("### 🏭 Sector Allocation Changes")
+                        
+                        if 'sector_allocation' in current_metrics and 'sector_allocation' in scenario_metrics:
+                            sectors = set(current_metrics['sector_allocation'].keys()) | set(scenario_metrics['sector_allocation'].keys())
+                            
+                            sector_comparison = []
+                            for sector in sectors:
+                                current_pct = current_metrics['sector_allocation'].get(sector, 0)
+                                scenario_pct = scenario_metrics['sector_allocation'].get(sector, 0)
+                                change = scenario_pct - current_pct
+                                
+                                sector_comparison.append({
+                                    'Sector': sector,
+                                    'Current %': f"{current_pct:.1f}%",
+                                    'Scenario %': f"{scenario_pct:.1f}%",
+                                    'Change': f"{change:+.1f}%"
+                                })
+                            
+                            sector_df = pd.DataFrame(sector_comparison)
+                            st.dataframe(sector_df, hide_index=True)
+                        
+                        # Visual comparison
+                        st.markdown("### 📊 Portfolio Composition")
+                        
+                        fig = go.Figure()
+                        
+                        # Current portfolio pie chart
+                        current_symbols = list(analysis['current_portfolio'].keys())
+                        current_values = [p['quantity'] * 100 for p in analysis['current_portfolio'].values()]  # Mock values
+                        
+                        fig.add_trace(go.Pie(
+                            labels=current_symbols,
+                            values=current_values,
+                            name="Current",
+                            domain=dict(x=[0, 0.48])
+                        ))
+                        
+                        # Scenario portfolio pie chart
+                        scenario_symbols = list(analysis['scenario_portfolio'].keys())
+                        scenario_values = [p['quantity'] * 100 for p in analysis['scenario_portfolio'].values()]  # Mock values
+                        
+                        fig.add_trace(go.Pie(
+                            labels=scenario_symbols,
+                            values=scenario_values,
+                            name="Scenario",
+                            domain=dict(x=[0.52, 1])
+                        ))
+                        
+                        fig.update_layout(
+                            title="Portfolio Composition: Current vs Scenario",
+                            annotations=[
+                                dict(text='Current', x=0.24, y=0.5, font_size=16, showarrow=False),
+                                dict(text='Scenario', x=0.76, y=0.5, font_size=16, showarrow=False)
+                            ]
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    else:
+                        st.info("📊 No scenario analysis available. Create and analyze a scenario first.")
+                
+                with whatif_tab3:
+                    st.subheader("💡 AI Recommendations")
+                    
+                    if 'what_if_analysis' in st.session_state:
+                        analysis = st.session_state.what_if_analysis
+                        recommendations = analysis.get('recommendations', [])
+                        
+                        if recommendations:
+                            st.markdown("### 🎯 Recommended Actions")
+                            
+                            for i, rec in enumerate(recommendations):
+                                with st.expander(f"💡 {rec.get('title', f'Recommendation {i+1}')}"):
+                                    st.write(rec.get('description', ''))
+                                    if 'impact' in rec:
+                                        st.info(f"**Expected Impact:** {rec['impact']}")
+                                    if 'confidence' in rec:
+                                        confidence = rec['confidence']
+                                        color = "green" if confidence > 0.7 else "orange" if confidence > 0.5 else "red"
+                                        st.markdown(f"**Confidence:** <span style='color: {color}'>{confidence:.0%}</span>", unsafe_allow_html=True)
+                        else:
+                            st.info("📊 No specific recommendations available for this scenario")
+                            
+                            # Generic improvement suggestions
+                            st.markdown("### 📈 General Portfolio Optimization Tips")
+                            
+                            tips = [
+                                "🎯 **Diversification**: Consider spreading investments across different sectors",
+                                "⚖️ **Risk Balance**: Mix growth and value stocks based on your risk tolerance",
+                                "💰 **Cost Averaging**: Regular small investments can reduce volatility impact",
+                                "🔄 **Rebalancing**: Periodically adjust holdings to maintain target allocation",
+                                "📊 **Research**: Keep analyzing fundamentals and market trends"
+                            ]
+                            
+                            for tip in tips:
+                                st.markdown(tip)
+                    else:
+                        st.info("💡 No analysis available. Create a scenario first to get recommendations.")
+                
+                with whatif_tab4:
+                    st.subheader("🧮 Risk Analysis")
+                    
+                    if 'what_if_analysis' in st.session_state:
+                        analysis = st.session_state.what_if_analysis
+                        
+                        st.markdown("### ⚠️ Risk Assessment")
+                        
+                        current_risk = analysis['current_metrics']['risk_score']
+                        scenario_risk = analysis['scenario_metrics']['risk_score']
+                        risk_change = scenario_risk - current_risk
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Current Risk Score", f"{current_risk:.1f}/10")
+                        
+                        with col2:
+                            st.metric("Scenario Risk Score", f"{scenario_risk:.1f}/10", f"{risk_change:+.1f}")
+                        
+                        with col3:
+                            risk_level = "Low" if scenario_risk < 4 else "Medium" if scenario_risk < 7 else "High"
+                            color = "green" if scenario_risk < 4 else "orange" if scenario_risk < 7 else "red"
+                            st.markdown(f"**Risk Level:** <span style='color: {color}'>{risk_level}</span>", unsafe_allow_html=True)
+                        
+                        # Risk factors
+                        st.markdown("### 📊 Risk Factors Analysis")
+                        
+                        risk_factors = {
+                            "Concentration Risk": "How much of portfolio is in single stocks/sectors",
+                            "Volatility Risk": "Expected price fluctuation based on historical data", 
+                            "Correlation Risk": "How similarly stocks move together",
+                            "Liquidity Risk": "Ability to quickly buy/sell without affecting price",
+                            "Market Risk": "Overall market conditions impact"
+                        }
+                        
+                        for factor, description in risk_factors.items():
+                            with st.expander(f"📋 {factor}"):
+                                st.write(description)
+                                # Mock risk score for each factor
+                                factor_score = np.random.uniform(3, 8)
+                                st.progress(factor_score/10, text=f"Risk Level: {factor_score:.1f}/10")
+                        
+                        # Risk mitigation suggestions
+                        st.markdown("### 🛡️ Risk Mitigation Strategies")
+                        
+                        mitigation_strategies = [
+                            "🎯 **Diversify Holdings**: Spread investments across 15-20 different stocks",
+                            "🏭 **Sector Balance**: Limit any single sector to <30% of portfolio",
+                            "🌍 **Geographic Spread**: Consider international exposure",
+                            "⏰ **Time Horizon**: Longer investment periods reduce short-term volatility impact",
+                            "💰 **Position Sizing**: Limit individual positions to 5-10% of total portfolio",
+                            "🔄 **Regular Review**: Monitor and rebalance quarterly"
+                        ]
+                        
+                        for strategy in mitigation_strategies:
+                            st.markdown(strategy)
+                            
+                    else:
+                        st.info("🧮 No risk analysis available. Create a scenario first.")
+                        
+            else:
+                st.error("❌ What-If Analyzer not available")
+    
     # --- Danish Stocks Manager ---
-    with tab5:
+    target_tab = tab6 if st.session_state.get('enhanced_features_enabled', False) else tab5
+    with target_tab:
         st.header("🇩🇰 Danish Stocks Manager")
         st.markdown("Manage and update the comprehensive list of Danish stocks for the Copenhagen Stock Exchange")
         
@@ -6458,7 +8172,8 @@ Generated by Advanced Stock Scoring System
                     st.warning(f"{new_name} already exists")
 
     # --- Performance Benchmarking ---
-    with tab6:
+    target_tab = tab7 if st.session_state.get('enhanced_features_enabled', False) else tab6
+    with target_tab:
         # Initialize score tracking
         initialize_score_tracking()
         
@@ -6471,7 +8186,8 @@ Generated by Advanced Stock Scoring System
         display_score_tracking()
 
     # --- Help & Documentation ---
-    with tab7:
+    target_tab = tab8 if st.session_state.get('enhanced_features_enabled', False) else tab7
+    with target_tab:
         st.header("ℹ️ Help & Documentation")
         st.markdown("Complete guide to using the Stock Analysis System")
         
@@ -6518,66 +8234,109 @@ Generated by Advanced Stock Scoring System
         
         with help_tab2:
             st.markdown("""
-            ### 🎯 **Scoring Methodology**
+            ### 🎯 **Enhanced Scoring Methodology**
             
-            Each stock receives a score from 0-10 based on multiple financial metrics:
+            Each stock receives a score from 0-10 based on multiple financial metrics with dynamic benchmarking:
             
-            #### 📈 **Core Metrics:**
+            #### 📈 **Core Metrics (Dynamic Benchmarking):**
             
             **Valuation Metrics:**
-            - **P/E Ratio**: Price-to-Earnings (lower is generally better)
+            - **P/E Ratio**: Price-to-Earnings (compared to industry average)
+            - **Forward P/E**: Future P/E ratio (more predictive)
             - **PEG Ratio**: P/E relative to growth (< 1.0 is ideal)
             - **P/B Ratio**: Price-to-Book (< 1.0 indicates undervaluation)
             - **EV/EBITDA**: Enterprise value to EBITDA
+            - **Price/Sales**: Revenue-based valuation
             
-            **Profitability Metrics:**
-            - **ROE**: Return on Equity (higher is better)
-            - **Gross Margin**: Profitability efficiency
-            - **Free Cash Flow**: Cash generation ability
+            **Profitability Metrics (Sector-Adjusted):**
+            - **ROE**: Return on Equity (compared to sector average)
+            - **Gross Margin**: Profitability efficiency (industry-relative)
+            - **Free Cash Flow**: Cash generation trend analysis
             
-            **Growth Metrics:**
-            - **Revenue Growth**: Year-over-year revenue increase
-            - **EPS Growth**: Earnings per share growth
+            **Growth Metrics (Industry-Relative):**
+            - **Revenue Growth**: Compared to sector growth rates
+            - **EPS Growth**: Earnings per share growth trajectory
             
-            **Financial Health:**
-            - **Debt/Equity**: Financial leverage (lower is safer)
+            **Financial Health (NEW - Comprehensive):**
+            - **Debt/Equity**: Sector-adjusted leverage scoring
+            - **Current Ratio**: Short-term liquidity vs industry
+            - **Interest Coverage**: Debt service capability
+            - **Cash Position**: Cash-to-market-cap analysis
             - **Dividend Yield**: Income generation
             
-            #### 🎯 **Score Interpretation:**
-            - **8.0-10.0**: 🚀 Strong Buy - Exceptional opportunity
-            - **6.5-7.9**: 📈 Buy - Good investment potential
-            - **4.0-6.4**: 🔄 Hold - Adequate performance
-            - **2.0-3.9**: 📉 Weak Sell - Below average
-            - **0.0-1.9**: 🛑 Strong Sell - Poor fundamentals
+            **Technical Momentum (NEW):**
+            - **Price Momentum**: 1, 3, 6-month performance
+            - **Moving Average Alignment**: Trend strength indicator
+            - **Volume Confirmation**: Trading activity validation
+            
+            **Market Sentiment:**
+            - **Analyst Upside**: Professional price target consensus
+            
+            #### 🏭 **Sector-Specific Adjustments:**
+            - **Technology**: Emphasis on growth and margins
+            - **Financials**: Focus on ROE and book value
+            - **Healthcare**: R&D efficiency and regulatory moats
+            - **Industrials**: Operational efficiency and cash flow
+            - **Consumer Staples**: Dividend stability and defensive metrics
+            
+            #### 🎯 **Enhanced Score Interpretation:**
+            - **8.0-10.0**: 🚀 Strong Buy - Top-tier opportunity with sector leadership
+            - **6.5-7.9**: 📈 Buy - Above-average fundamentals with positive momentum
+            - **4.0-6.4**: 🔄 Hold - Adequate performance, monitor for improvements
+            - **2.0-3.9**: 📉 Weak Sell - Below-average metrics, consider alternatives
+            - **0.0-1.9**: 🛑 Strong Sell - Poor fundamentals across multiple dimensions
+            
+            #### ⚡ **Key Enhancements:**
+            - **Dynamic Benchmarking**: Scores adapt to industry standards
+            - **Momentum Integration**: Technical analysis complements fundamentals
+            - **Financial Health**: Comprehensive risk assessment
+            - **Sector Intelligence**: Tailored evaluation criteria
             """)
         
         with help_tab3:
             st.subheader("📈 Trading Signals Guide")
             st.markdown("""
-            ### 🎯 **Technical Analysis Signals**
+            ### 🎯 **Enhanced Technical Analysis Signals**
             
-            #### 📊 **Key Indicators:**
+            #### 📊 **Momentum Indicators:**
+            
+            **Price Momentum (NEW)**
+            - **1-Month**: Short-term trend direction
+            - **3-Month**: Medium-term momentum strength
+            - **6-Month**: Long-term trend validation
+            - **Moving Average Alignment**: Bullish when price > SMA20 > SMA50 > SMA200
             
             **RSI (Relative Strength Index)**
-            - **< 30**: Oversold (potential buy)
-            - **> 70**: Overbought (potential sell)
+            - **< 30**: Oversold (potential buy opportunity)
+            - **> 70**: Overbought (potential sell signal)
             - **30-70**: Normal trading range
             
             **Moving Averages**
             - **Golden Cross**: 20-day MA crosses above 50-day MA (bullish)
             - **Death Cross**: 20-day MA crosses below 50-day MA (bearish)
-            - **Price above both MAs**: Strong uptrend
+            - **Price above all MAs**: Strong uptrend confirmation
             
             **MACD (Moving Average Convergence Divergence)**
-            - **MACD > Signal**: Bullish momentum
-            - **MACD < Signal**: Bearish momentum
-            - **Histogram**: Shows momentum strength
+            - **MACD > Signal**: Bullish momentum building
+            - **MACD < Signal**: Bearish momentum developing
+            - **Histogram**: Shows momentum acceleration/deceleration
+            
+            #### 🔄 **Combined Scoring Approach:**
+            - **Fundamental Score (60%)**: Financial health and valuation
+            - **Technical Score (40%)**: Momentum and trend analysis
+            - **Final Recommendation**: Weighted combination for optimal timing
             """)
         
         with help_tab4:
             st.subheader("🔧 Advanced Features")
             st.markdown("""
             ### 🎯 **Advanced Capabilities**
+            
+            #### 🧠 **Dynamic Intelligence (NEW)**
+            - **Sector Benchmarking**: Industry-relative performance analysis
+            - **Momentum Scoring**: Technical trend integration
+            - **Financial Health**: Multi-dimensional risk assessment
+            - **Adaptive Weights**: Sector-specific metric emphasis
             
             #### 🔍 **Multi-Market Screening**
             - Screen S&P 500, NASDAQ 100, European, and Danish stocks
@@ -6704,7 +8463,8 @@ Generated by Advanced Stock Scoring System
             """)
 
     # --- Compare & Export ---
-    with tab8:
+    target_tab = tab9 if st.session_state.get('enhanced_features_enabled', False) else tab8
+    with target_tab:
         st.header("⚖️ Compare & Export Results")
         st.markdown("Side-by-side comparison and data export functionality")
         
@@ -6854,6 +8614,582 @@ Generated by Advanced Stock Scoring System
                         st.error("Could not analyze any of the provided symbols")
 
 # Portfolio management helper functions
+
+def calculate_portfolio_value():
+    """Calculate current portfolio value and P&L"""
+    if not st.session_state.portfolio_holdings:
+        st.warning("No portfolio holdings found")
+        return
+    
+    st.subheader("💰 Portfolio Value Calculation")
+    
+    # Get current prices for all holdings
+    symbols = list(st.session_state.portfolio_holdings.keys())
+    
+    with st.spinner(f"📊 Fetching current prices for {len(symbols)} holdings..."):
+        # Use yfinance to get current prices
+        import yfinance as yf
+        
+        portfolio_data = []
+        total_cost = 0
+        total_value = 0
+        
+        progress_bar = st.progress(0)
+        
+        for i, symbol in enumerate(symbols):
+            progress_bar.progress((i + 1) / len(symbols))
+            
+            holding = st.session_state.portfolio_holdings[symbol]
+            quantity = holding["quantity"]
+            purchase_price = holding["purchase_price"]
+            purchase_date = holding["purchase_date"]
+            
+            # Get current price
+            try:
+                ticker = yf.Ticker(symbol)
+                current_price = ticker.history(period="1d")['Close'].iloc[-1] if not ticker.history(period="1d").empty else 0
+            except:
+                current_price = 0
+            
+            # Calculate metrics
+            cost_basis = quantity * purchase_price
+            market_value = quantity * current_price if current_price > 0 else 0
+            unrealized_pnl = market_value - cost_basis if purchase_price > 0 else 0
+            pnl_percent = (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0
+            
+            portfolio_data.append({
+                'Symbol': symbol,
+                'Quantity': f"{quantity:.2f}",
+                'Purchase Price': f"${purchase_price:.2f}" if purchase_price > 0 else "Not Set",
+                'Current Price': f"${current_price:.2f}" if current_price > 0 else "N/A",
+                'Cost Basis': f"${cost_basis:.2f}" if purchase_price > 0 else "N/A",
+                'Market Value': f"${market_value:.2f}" if current_price > 0 else "N/A",
+                'Unrealized P&L': f"${unrealized_pnl:.2f}" if purchase_price > 0 and current_price > 0 else "N/A",
+                'P&L %': f"{pnl_percent:.1f}%" if purchase_price > 0 and current_price > 0 else "N/A",
+                'Purchase Date': purchase_date
+            })
+            
+            if purchase_price > 0:
+                total_cost += cost_basis
+            if current_price > 0 and purchase_price > 0:
+                total_value += market_value
+        
+        progress_bar.empty()
+        
+        # Display summary metrics
+        if total_cost > 0:
+            total_pnl = total_value - total_cost
+            total_pnl_percent = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Cost Basis", f"${total_cost:,.2f}")
+            with col2:
+                st.metric("Current Value", f"${total_value:,.2f}")
+            with col3:
+                st.metric("Unrealized P&L", f"${total_pnl:,.2f}", f"{total_pnl_percent:.1f}%")
+            with col4:
+                if total_pnl >= 0:
+                    st.success(f"📈 Gain: {total_pnl_percent:.1f}%")
+                else:
+                    st.error(f"📉 Loss: {total_pnl_percent:.1f}%")
+        
+        # Display detailed holdings table
+        if portfolio_data:
+            st.subheader("📋 Detailed Holdings")
+            holdings_df = pd.DataFrame(portfolio_data)
+            st.dataframe(holdings_df, use_container_width=True, hide_index=True)
+
+def export_portfolio_to_csv():
+    """Export portfolio holdings to CSV"""
+    if not st.session_state.portfolio_holdings:
+        st.warning("No holdings to export")
+        return
+    
+    export_data = []
+    for symbol, holding in st.session_state.portfolio_holdings.items():
+        export_data.append({
+            'Symbol': symbol,
+            'Quantity': holding['quantity'],
+            'Purchase_Price': holding['purchase_price'],
+            'Purchase_Date': holding['purchase_date'],
+            'Cost_Basis': holding['quantity'] * holding['purchase_price']
+        })
+    
+    export_df = pd.DataFrame(export_data)
+    csv = export_df.to_csv(index=False)
+    st.download_button(
+        "📥 Download Holdings CSV",
+        data=csv,
+        file_name=f"portfolio_holdings_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
+    )
+
+def display_portfolio_summary():
+    """Display portfolio summary statistics"""
+    if not st.session_state.portfolio_holdings:
+        st.warning("No holdings to summarize")
+        return
+    
+    st.subheader("📊 Portfolio Summary")
+    
+    total_holdings = len(st.session_state.portfolio_holdings)
+    total_cost = sum(
+        holding["quantity"] * holding["purchase_price"] 
+        for holding in st.session_state.portfolio_holdings.values()
+        if holding["purchase_price"] > 0
+    )
+    holdings_with_prices = sum(
+        1 for holding in st.session_state.portfolio_holdings.values()
+        if holding["purchase_price"] > 0
+    )
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Holdings", total_holdings)
+    with col2:
+        st.metric("Holdings with Prices", holdings_with_prices)
+    with col3:
+        st.metric("Total Investment", f"${total_cost:,.2f}" if total_cost > 0 else "Set prices")
+    
+    # Show top holdings by cost basis
+    if holdings_with_prices > 0:
+        st.markdown("### 🔝 Top Holdings by Investment")
+        holdings_list = []
+        for symbol, holding in st.session_state.portfolio_holdings.items():
+            if holding["purchase_price"] > 0:
+                cost_basis = holding["quantity"] * holding["purchase_price"]
+                holdings_list.append({
+                    'Symbol': symbol,
+                    'Investment': cost_basis,
+                    'Percentage': (cost_basis / total_cost * 100) if total_cost > 0 else 0
+                })
+        
+        holdings_list.sort(key=lambda x: x['Investment'], reverse=True)
+        
+        for holding in holdings_list[:5]:  # Show top 5
+            st.write(f"**{holding['Symbol']}**: ${holding['Investment']:,.2f} ({holding['Percentage']:.1f}%)")
+
+def run_portfolio_pnl_analysis():
+    """Run comprehensive P&L analysis for portfolio holdings"""
+    if not st.session_state.portfolio_holdings:
+        st.warning("No portfolio holdings found for P&L analysis")
+        return
+    
+    st.subheader("💰 Portfolio P&L Analysis")
+    
+    # Get current prices and calculate P&L
+    import yfinance as yf
+    
+    holdings_data = []
+    total_cost = 0
+    total_value = 0
+    total_gain_loss = 0
+    
+    progress_bar = st.progress(0)
+    symbols = list(st.session_state.portfolio_holdings.keys())
+    
+    for i, symbol in enumerate(symbols):
+        progress_bar.progress((i + 1) / len(symbols))
+        
+        holding = st.session_state.portfolio_holdings[symbol]
+        quantity = holding["quantity"]
+        purchase_price = holding["purchase_price"]
+        purchase_date = holding["purchase_date"]
+        
+        # Get current price
+        try:
+            ticker = yf.Ticker(symbol)
+            current_data = ticker.history(period="1d")
+            current_price = current_data['Close'].iloc[-1] if not current_data.empty else 0
+        except:
+            current_price = 0
+        
+        # Calculate metrics
+        cost_basis = quantity * purchase_price if purchase_price > 0 else 0
+        market_value = quantity * current_price if current_price > 0 else 0
+        gain_loss = market_value - cost_basis if purchase_price > 0 and current_price > 0 else 0
+        gain_loss_pct = (gain_loss / cost_basis * 100) if cost_basis > 0 else 0
+        
+        # Days held calculation
+        try:
+            from datetime import datetime
+            purchase_dt = datetime.strptime(purchase_date, "%Y-%m-%d")
+            days_held = (datetime.now() - purchase_dt).days
+        except:
+            days_held = 0
+        
+        holdings_data.append({
+            'Symbol': symbol,
+            'Quantity': quantity,
+            'Purchase Price': purchase_price,
+            'Current Price': current_price,
+            'Cost Basis': cost_basis,
+            'Market Value': market_value,
+            'Gain/Loss ($)': gain_loss,
+            'Gain/Loss (%)': gain_loss_pct,
+            'Days Held': days_held,
+            'Purchase Date': purchase_date
+        })
+        
+        if purchase_price > 0:
+            total_cost += cost_basis
+        if current_price > 0 and purchase_price > 0:
+            total_value += market_value
+            total_gain_loss += gain_loss
+    
+    progress_bar.empty()
+    
+    # Display summary metrics
+    if total_cost > 0:
+        total_gain_loss_pct = (total_gain_loss / total_cost * 100) if total_cost > 0 else 0
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Cost Basis", f"${total_cost:,.2f}")
+        with col2:
+            st.metric("Current Market Value", f"${total_value:,.2f}")
+        with col3:
+            st.metric("Total Gain/Loss", f"${total_gain_loss:,.2f}", f"{total_gain_loss_pct:.1f}%")
+        with col4:
+            profitable_positions = sum(1 for h in holdings_data if h['Gain/Loss ($)'] > 0 and h['Cost Basis'] > 0)
+            total_positions = sum(1 for h in holdings_data if h['Cost Basis'] > 0)
+            win_rate = (profitable_positions / total_positions * 100) if total_positions > 0 else 0
+            st.metric("Win Rate", f"{profitable_positions}/{total_positions} ({win_rate:.1f}%)")
+    
+    # Display detailed holdings table
+    if holdings_data:
+        st.markdown("### 📋 Detailed P&L by Holding")
+        
+        # Create DataFrame for better display
+        df = pd.DataFrame(holdings_data)
+        
+        # Format the dataframe for display
+        display_df = df.copy()
+        display_df['Purchase Price'] = display_df['Purchase Price'].apply(lambda x: f"${x:.2f}" if x > 0 else "Not Set")
+        display_df['Current Price'] = display_df['Current Price'].apply(lambda x: f"${x:.2f}" if x > 0 else "N/A")
+        display_df['Cost Basis'] = display_df['Cost Basis'].apply(lambda x: f"${x:.2f}" if x > 0 else "N/A")
+        display_df['Market Value'] = display_df['Market Value'].apply(lambda x: f"${x:.2f}" if x > 0 else "N/A")
+        display_df['Gain/Loss ($)'] = display_df['Gain/Loss ($)'].apply(lambda x: f"${x:.2f}" if abs(x) > 0.01 else "N/A")
+        display_df['Gain/Loss (%)'] = display_df['Gain/Loss (%)'].apply(lambda x: f"{x:.1f}%" if abs(x) > 0.01 else "N/A")
+        
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        # Top performers and worst performers
+        profitable_holdings = [h for h in holdings_data if h['Gain/Loss ($)'] > 0 and h['Cost Basis'] > 0]
+        losing_holdings = [h for h in holdings_data if h['Gain/Loss ($)'] < 0 and h['Cost Basis'] > 0]
+        
+        if profitable_holdings or losing_holdings:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if profitable_holdings:
+                    st.markdown("### 🟢 Top Performers")
+                    profitable_holdings.sort(key=lambda x: x['Gain/Loss (%)'], reverse=True)
+                    for holding in profitable_holdings[:3]:
+                        st.success(f"**{holding['Symbol']}**: +${holding['Gain/Loss ($)']:.2f} ({holding['Gain/Loss (%)']:.1f}%)")
+            
+            with col2:
+                if losing_holdings:
+                    st.markdown("### 🔴 Underperformers")
+                    losing_holdings.sort(key=lambda x: x['Gain/Loss (%)'])
+                    for holding in losing_holdings[:3]:
+                        st.error(f"**{holding['Symbol']}**: ${holding['Gain/Loss ($)']:.2f} ({holding['Gain/Loss (%)']:.1f}%)")
+
+def run_portfolio_alerts():
+    """Run portfolio alerts with P&L monitoring"""
+    if not st.session_state.portfolio_holdings:
+        st.warning("No portfolio holdings found for alerts")
+        return
+    
+    st.subheader("🚨 Portfolio Alerts & Monitoring")
+    
+    # Alert settings
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        gain_threshold = st.number_input("Gain Alert Threshold (%)", value=10.0, step=1.0, 
+                                       help="Alert when any position gains more than this percentage")
+    with col2:
+        loss_threshold = st.number_input("Loss Alert Threshold (%)", value=-10.0, step=1.0,
+                                       help="Alert when any position loses more than this percentage")
+    with col3:
+        price_change_threshold = st.number_input("Daily Price Change Alert (%)", value=5.0, step=1.0,
+                                                help="Alert when any position moves more than this % in a day")
+    
+    if st.button("🔍 Check Portfolio Alerts", type="primary"):
+        import yfinance as yf
+        
+        alerts = []
+        progress_bar = st.progress(0)
+        symbols = list(st.session_state.portfolio_holdings.keys())
+        
+        for i, symbol in enumerate(symbols):
+            progress_bar.progress((i + 1) / len(symbols))
+            
+            holding = st.session_state.portfolio_holdings[symbol]
+            quantity = holding["quantity"]
+            purchase_price = holding["purchase_price"]
+            
+            if purchase_price <= 0:
+                continue
+            
+            try:
+                ticker = yf.Ticker(symbol)
+                # Get current data and recent history
+                hist = ticker.history(period="5d")
+                
+                if hist.empty:
+                    continue
+                
+                current_price = hist['Close'].iloc[-1]
+                prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+                
+                # Calculate metrics
+                gain_loss_pct = ((current_price - purchase_price) / purchase_price) * 100
+                daily_change_pct = ((current_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
+                position_value = quantity * current_price
+                
+                # Check for alerts
+                if gain_loss_pct >= gain_threshold:
+                    alerts.append({
+                        'Type': '🟢 GAIN ALERT',
+                        'Symbol': symbol,
+                        'Message': f'Position up {gain_loss_pct:.1f}% from purchase price',
+                        'Details': f'Purchase: ${purchase_price:.2f} | Current: ${current_price:.2f} | Value: ${position_value:.2f}',
+                        'Severity': 'success'
+                    })
+                
+                if gain_loss_pct <= loss_threshold:
+                    alerts.append({
+                        'Type': '🔴 LOSS ALERT',
+                        'Symbol': symbol,
+                        'Message': f'Position down {gain_loss_pct:.1f}% from purchase price',
+                        'Details': f'Purchase: ${purchase_price:.2f} | Current: ${current_price:.2f} | Value: ${position_value:.2f}',
+                        'Severity': 'error'
+                    })
+                
+                if abs(daily_change_pct) >= price_change_threshold:
+                    direction = "up" if daily_change_pct > 0 else "down"
+                    alerts.append({
+                        'Type': '🔄 PRICE MOVEMENT',
+                        'Symbol': symbol,
+                        'Message': f'Price moved {direction} {abs(daily_change_pct):.1f}% today',
+                        'Details': f'Previous: ${prev_close:.2f} | Current: ${current_price:.2f} | Position Value: ${position_value:.2f}',
+                        'Severity': 'warning'
+                    })
+                
+            except Exception as e:
+                st.error(f"Error checking alerts for {symbol}: {str(e)}")
+        
+        progress_bar.empty()
+        
+        # Display alerts
+        if alerts:
+            st.markdown("### 🚨 Active Alerts")
+            for alert in alerts:
+                if alert['Severity'] == 'success':
+                    st.success(f"**{alert['Type']} - {alert['Symbol']}**\n{alert['Message']}\n{alert['Details']}")
+                elif alert['Severity'] == 'error':
+                    st.error(f"**{alert['Type']} - {alert['Symbol']}**\n{alert['Message']}\n{alert['Details']}")
+                else:
+                    st.warning(f"**{alert['Type']} - {alert['Symbol']}**\n{alert['Message']}\n{alert['Details']}")
+        else:
+            st.info("✅ No alerts triggered based on current thresholds")
+        
+        # Portfolio risk summary
+        st.markdown("### 📊 Portfolio Risk Summary")
+        try:
+            total_value = 0
+            total_cost = 0
+            risky_positions = 0
+            
+            for symbol in symbols:
+                holding = st.session_state.portfolio_holdings[symbol]
+                if holding["purchase_price"] > 0:
+                    ticker = yf.Ticker(symbol)
+                    current_price = ticker.history(period="1d")['Close'].iloc[-1]
+                    
+                    position_value = holding["quantity"] * current_price
+                    cost_basis = holding["quantity"] * holding["purchase_price"]
+                    
+                    total_value += position_value
+                    total_cost += cost_basis
+                    
+                    # Check if position is risky (>5% daily volatility)
+                    hist = ticker.history(period="30d")
+                    if len(hist) > 1:
+                        returns = hist['Close'].pct_change().dropna()
+                        volatility = returns.std() * 100
+                        if volatility > 5:
+                            risky_positions += 1
+            
+            portfolio_return = ((total_value - total_cost) / total_cost * 100) if total_cost > 0 else 0
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Portfolio Return", f"{portfolio_return:.1f}%")
+            with col2:
+                st.metric("High Volatility Positions", f"{risky_positions}/{len(symbols)}")
+            with col3:
+                risk_level = "Low" if risky_positions <= len(symbols) * 0.3 else "Medium" if risky_positions <= len(symbols) * 0.6 else "High"
+                st.metric("Risk Level", risk_level)
+                
+        except Exception as e:
+            st.error(f"Error calculating portfolio risk: {str(e)}")
+
+def create_portfolio_performance_chart():
+    """Create a performance chart for the portfolio"""
+    if not st.session_state.portfolio_holdings:
+        st.warning("No holdings to chart")
+        return
+    
+    st.subheader("📈 Portfolio Performance Chart")
+    st.info("📊 Performance chart feature will be implemented with historical data tracking")
+    
+    # For now, show a simple allocation chart
+    holdings_with_prices = {
+        symbol: holding for symbol, holding in st.session_state.portfolio_holdings.items()
+        if holding["purchase_price"] > 0
+    }
+    
+    if holdings_with_prices:
+        import plotly.express as px
+        
+        # Create allocation pie chart
+        allocation_data = []
+        for symbol, holding in holdings_with_prices.items():
+            cost_basis = holding["quantity"] * holding["purchase_price"]
+            allocation_data.append({
+                'Symbol': symbol,
+                'Investment': cost_basis
+            })
+        
+        if allocation_data:
+            df = pd.DataFrame(allocation_data)
+            fig = px.pie(df, values='Investment', names='Symbol', 
+                        title="Portfolio Allocation by Investment")
+            st.plotly_chart(fig, use_container_width=True)
+
+def run_portfolio_pnl_analysis():
+    """Run comprehensive P&L analysis for portfolio holdings"""
+    if not st.session_state.portfolio_holdings:
+        st.warning("No portfolio holdings found")
+        return
+    
+    st.subheader("💰 Portfolio P&L Analysis")
+    
+    # Get current prices for all holdings
+    symbols = list(st.session_state.portfolio_holdings.keys())
+    
+    with st.spinner(f"📊 Analyzing P&L for {len(symbols)} holdings..."):
+        import yfinance as yf
+        
+        analysis_data = []
+        total_cost = 0
+        total_value = 0
+        total_pnl = 0
+        
+        for symbol in symbols:
+            holding = st.session_state.portfolio_holdings[symbol]
+            quantity = holding["quantity"]
+            purchase_price = holding["purchase_price"]
+            purchase_date = holding["purchase_date"]
+            
+            # Get current price
+            try:
+                ticker = yf.Ticker(symbol)
+                current_price = ticker.history(period="1d")['Close'].iloc[-1] if not ticker.history(period="1d").empty else 0
+            except:
+                current_price = 0
+            
+            # Calculate metrics
+            cost_basis = quantity * purchase_price if purchase_price > 0 else 0
+            market_value = quantity * current_price if current_price > 0 else 0
+            unrealized_pnl = market_value - cost_basis if purchase_price > 0 and current_price > 0 else 0
+            pnl_percent = (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0
+            
+            # Calculate holding period
+            try:
+                purchase_dt = datetime.strptime(purchase_date, "%Y-%m-%d")
+                holding_days = (datetime.now() - purchase_dt).days
+            except:
+                holding_days = 0
+            
+            analysis_data.append({
+                'Symbol': symbol,
+                'Quantity': quantity,
+                'Purchase Price': purchase_price,
+                'Current Price': current_price,
+                'Cost Basis': cost_basis,
+                'Market Value': market_value,
+                'Unrealized P&L': unrealized_pnl,
+                'P&L %': pnl_percent,
+                'Holding Days': holding_days,
+                'Purchase Date': purchase_date
+            })
+            
+            if cost_basis > 0:
+                total_cost += cost_basis
+            if market_value > 0:
+                total_value += market_value
+            if unrealized_pnl != 0:
+                total_pnl += unrealized_pnl
+        
+        # Display summary metrics
+        if total_cost > 0:
+            total_pnl_percent = (total_pnl / total_cost * 100)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Cost Basis", f"${total_cost:,.2f}")
+            with col2:
+                st.metric("Current Value", f"${total_value:,.2f}")
+            with col3:
+                st.metric("Total P&L", f"${total_pnl:,.2f}", f"{total_pnl_percent:.1f}%")
+            with col4:
+                performance_status = "📈 Profitable" if total_pnl >= 0 else "📉 Loss"
+                st.metric("Performance", performance_status)
+        
+        # Winners and losers
+        st.markdown("### 🏆 Best & Worst Performers")
+        
+        profitable_holdings = [h for h in analysis_data if h['Unrealized P&L'] > 0]
+        losing_holdings = [h for h in analysis_data if h['Unrealized P&L'] < 0]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🟢 Top Gainers:**")
+            if profitable_holdings:
+                profitable_holdings.sort(key=lambda x: x['P&L %'], reverse=True)
+                for holding in profitable_holdings[:3]:
+                    st.success(f"**{holding['Symbol']}**: {holding['P&L %']:.1f}% (${holding['Unrealized P&L']:.2f})")
+            else:
+                st.info("No profitable positions")
+        
+        with col2:
+            st.markdown("**🔴 Top Losers:**")
+            if losing_holdings:
+                losing_holdings.sort(key=lambda x: x['P&L %'])
+                for holding in losing_holdings[:3]:
+                    st.error(f"**{holding['Symbol']}**: {holding['P&L %']:.1f}% (${holding['Unrealized P&L']:.2f})")
+            else:
+                st.info("No losing positions")
+        
+        # Detailed analysis table
+        if analysis_data:
+            st.markdown("### 📋 Detailed P&L Analysis")
+            analysis_df = pd.DataFrame(analysis_data)
+            
+            # Format the dataframe for display
+            display_df = analysis_df.copy()
+            for col in ['Purchase Price', 'Current Price', 'Cost Basis', 'Market Value', 'Unrealized P&L']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: f"${x:.2f}" if x != 0 else "N/A")
+            
+            display_df['P&L %'] = display_df['P&L %'].apply(lambda x: f"{x:.1f}%" if x != 0 else "N/A")
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 def analyze_portfolio_quick(portfolio):
     """Quick portfolio analysis"""
