@@ -14,6 +14,13 @@ from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
+# Suppress numpy deprecation warnings related to pandas compatibility
+import sys
+if sys.version_info >= (3, 7):
+    warnings.filterwarnings('ignore', message='.*np.bool.*deprecated.*', category=DeprecationWarning)
+    warnings.filterwarnings('ignore', message='.*np.int.*deprecated.*', category=DeprecationWarning)
+    warnings.filterwarnings('ignore', message='.*np.float.*deprecated.*', category=DeprecationWarning)
+
 # Enhanced Features Integration
 try:
     from enhanced_features_integration import EnhancedFeaturesManager
@@ -40,6 +47,318 @@ st.set_page_config(layout="wide", page_title="AS System v6 - Enhanced")
 # Configuration
 API_KEY = "7J1AJVC9MAYLRRA7"
 REQUEST_DELAY = 0.5
+
+# Advanced Risk Analysis System
+class AdvancedRiskAnalyzer:
+    def __init__(self):
+        self.risk_free_rate = 0.02  # 2% annual risk-free rate
+        
+    def calculate_comprehensive_risk_metrics(self, portfolio_data):
+        """Calculate comprehensive risk metrics for portfolio"""
+        try:
+            # Extract symbols from portfolio data
+            if isinstance(portfolio_data, pd.DataFrame):
+                portfolio_symbols = portfolio_data['Symbol'].tolist() if 'Symbol' in portfolio_data.columns else []
+                holdings_data = portfolio_data.to_dict('records') if not portfolio_data.empty else None
+            else:
+                # Assume it's a list of symbols for backward compatibility
+                portfolio_symbols = portfolio_data if portfolio_data else []
+                holdings_data = None
+            
+            # Fetch historical data for all symbols
+            price_data = self.get_portfolio_price_data(portfolio_symbols)
+            
+            if price_data.empty:
+                return self.get_default_risk_metrics()
+            
+            # Calculate returns
+            returns = price_data.pct_change().dropna()
+            portfolio_returns = self.calculate_portfolio_returns(returns, holdings_data)
+            
+            risk_metrics = {
+                # Volatility Metrics
+                'portfolio_volatility': self.calculate_portfolio_volatility(returns, holdings_data),
+                'individual_volatilities': self.calculate_individual_volatilities(returns),
+                
+                # Downside Risk Metrics
+                'value_at_risk_95': self.calculate_var(portfolio_returns, confidence=0.95),
+                'value_at_risk_99': self.calculate_var(portfolio_returns, confidence=0.99),
+                'expected_shortfall': self.calculate_expected_shortfall(portfolio_returns),
+                'maximum_drawdown': self.calculate_maximum_drawdown(portfolio_returns),
+                'downside_deviation': self.calculate_downside_deviation(portfolio_returns),
+                
+                # Risk-Adjusted Performance
+                'sharpe_ratio': self.calculate_sharpe_ratio(portfolio_returns),
+                'sortino_ratio': self.calculate_sortino_ratio(portfolio_returns),
+                'calmar_ratio': self.calculate_calmar_ratio(portfolio_returns),
+                'treynor_ratio': self.calculate_treynor_ratio(portfolio_returns, portfolio_symbols),
+                
+                # Portfolio Risk Decomposition
+                'correlation_matrix': self.calculate_correlation_matrix(returns),
+                'concentration_risk': self.calculate_concentration_risk(holdings_data),
+                'factor_exposures': self.calculate_factor_exposures(portfolio_symbols),
+                'tail_risk': self.calculate_tail_risk(portfolio_returns),
+                
+                # Stress Testing
+                'stress_scenarios': self.run_stress_scenarios(portfolio_symbols, holdings_data),
+                'monte_carlo_var': self.monte_carlo_simulation(returns, holdings_data),
+                
+                # Liquidity Risk
+                'liquidity_score': self.calculate_liquidity_score(portfolio_symbols),
+                'market_impact': self.estimate_market_impact(portfolio_symbols, holdings_data)
+            }
+            
+            return risk_metrics
+            
+        except Exception as e:
+            st.error(f"Error calculating risk metrics: {e}")
+            return self.get_default_risk_metrics()
+    
+    def get_portfolio_price_data(self, symbols, period="1y"):
+        """Fetch price data for portfolio symbols"""
+        price_data = pd.DataFrame()
+        
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period=period)
+                if not hist.empty:
+                    price_data[symbol] = hist['Close']
+            except:
+                continue
+        
+        return price_data
+    
+    def calculate_portfolio_returns(self, returns, holdings_data):
+        """Calculate portfolio-weighted returns"""
+        if holdings_data is None or len(holdings_data) == 0:
+            # Equal weight if no holdings data
+            return returns.mean(axis=1)
+        
+        # Calculate weights from holdings
+        total_value = sum(holding.get('market_value', 0) for holding in holdings_data.values())
+        if total_value == 0:
+            return returns.mean(axis=1)
+        
+        weights = {}
+        for symbol, holding in holdings_data.items():
+            if symbol in returns.columns:
+                weights[symbol] = holding.get('market_value', 0) / total_value
+        
+        # Calculate weighted returns
+        portfolio_returns = pd.Series(0, index=returns.index)
+        for symbol, weight in weights.items():
+            if symbol in returns.columns:
+                portfolio_returns += returns[symbol] * weight
+        
+        return portfolio_returns
+    
+    def calculate_portfolio_volatility(self, returns, holdings_data):
+        """Calculate portfolio volatility"""
+        portfolio_returns = self.calculate_portfolio_returns(returns, holdings_data)
+        return portfolio_returns.std() * np.sqrt(252)  # Annualized
+    
+    def calculate_individual_volatilities(self, returns):
+        """Calculate individual stock volatilities"""
+        return {col: returns[col].std() * np.sqrt(252) for col in returns.columns}
+    
+    def calculate_var(self, returns, confidence=0.95):
+        """Calculate Value at Risk"""
+        if len(returns) == 0:
+            return 0
+        return np.percentile(returns, (1 - confidence) * 100)
+    
+    def calculate_expected_shortfall(self, returns, confidence=0.95):
+        """Calculate Expected Shortfall (Conditional VaR)"""
+        if len(returns) == 0:
+            return 0
+        var = self.calculate_var(returns, confidence)
+        return returns[returns <= var].mean()
+    
+    def calculate_maximum_drawdown(self, returns):
+        """Calculate Maximum Drawdown"""
+        if len(returns) == 0:
+            return 0
+        cumulative = (1 + returns).cumprod()
+        peak = cumulative.expanding().max()
+        drawdown = (cumulative - peak) / peak
+        return drawdown.min()
+    
+    def calculate_downside_deviation(self, returns, target_return=0):
+        """Calculate Downside Deviation"""
+        if len(returns) == 0:
+            return 0
+        downside_returns = returns[returns < target_return]
+        return np.sqrt(np.mean(downside_returns**2)) if len(downside_returns) > 0 else 0
+    
+    def calculate_sharpe_ratio(self, returns):
+        """Calculate Sharpe Ratio"""
+        if len(returns) == 0 or returns.std() == 0:
+            return 0
+        excess_returns = returns.mean() - (self.risk_free_rate / 252)
+        return (excess_returns / returns.std()) * np.sqrt(252)
+    
+    def calculate_sortino_ratio(self, returns, target_return=0):
+        """Calculate Sortino Ratio"""
+        if len(returns) == 0:
+            return 0
+        excess_returns = returns.mean() - target_return/252
+        downside_dev = self.calculate_downside_deviation(returns, target_return/252)
+        return (excess_returns / downside_dev) * np.sqrt(252) if downside_dev != 0 else 0
+    
+    def calculate_calmar_ratio(self, returns):
+        """Calculate Calmar Ratio"""
+        if len(returns) == 0:
+            return 0
+        annual_return = (1 + returns.mean())**252 - 1
+        max_dd = abs(self.calculate_maximum_drawdown(returns))
+        return annual_return / max_dd if max_dd != 0 else 0
+    
+    def calculate_treynor_ratio(self, returns, symbols):
+        """Calculate Treynor Ratio (simplified)"""
+        if len(returns) == 0:
+            return 0
+        excess_returns = returns.mean() - (self.risk_free_rate / 252)
+        # Simplified beta calculation using market proxy
+        return excess_returns * np.sqrt(252)  # Simplified version
+    
+    def calculate_correlation_matrix(self, returns):
+        """Calculate correlation matrix with enhanced error handling"""
+        try:
+            if returns.empty:
+                return pd.DataFrame()
+            
+            # Additional check for sufficient data
+            if len(returns) < 2:
+                return pd.DataFrame()
+            
+            # Calculate correlation matrix with error handling
+            correlation_matrix = returns.corr(method='pearson')
+            
+            # Handle any NaN values
+            correlation_matrix = correlation_matrix.fillna(0)
+            
+            return correlation_matrix
+            
+        except Exception as e:
+            # If correlation calculation fails, return empty DataFrame
+            print(f"Warning: Correlation matrix calculation failed: {e}")
+            return pd.DataFrame()
+    
+    def calculate_concentration_risk(self, holdings_data):
+        """Calculate portfolio concentration risk using Herfindahl Index"""
+        if not holdings_data:
+            return 0
+        
+        total_value = sum(holding.get('market_value', 0) for holding in holdings_data.values())
+        if total_value == 0:
+            return 0
+        
+        weights = [holding.get('market_value', 0) / total_value for holding in holdings_data.values()]
+        hhi = sum(w**2 for w in weights)
+        
+        # Convert to risk score (0-10, where 10 is highest concentration risk)
+        return min(10, hhi * 10)
+    
+    def calculate_factor_exposures(self, symbols):
+        """Calculate factor exposures (simplified)"""
+        # Simplified factor exposure calculation
+        return {'market_beta': 1.0, 'size_factor': 0.0, 'value_factor': 0.0}
+    
+    def calculate_tail_risk(self, returns):
+        """Calculate tail risk metrics"""
+        if len(returns) == 0:
+            return 0
+        return returns.quantile(0.01)  # 1% quantile
+    
+    def calculate_liquidity_score(self, symbols):
+        """Calculate liquidity score (simplified)"""
+        # Simplified liquidity scoring
+        return 7.5  # Default good liquidity score
+    
+    def estimate_market_impact(self, symbols, holdings_data):
+        """Estimate market impact (simplified)"""
+        # Simplified market impact estimation
+        return 0.01  # 1% estimated impact
+    
+    def run_stress_scenarios(self, symbols, holdings_data):
+        """Run various stress test scenarios"""
+        scenarios = {
+            'market_crash_2008': {'description': '2008 Financial Crisis (-50% broad market)', 'impact': -0.50},
+            'covid_crash_2020': {'description': 'COVID-19 Market Crash (-35% in 5 weeks)', 'impact': -0.35},
+            'tech_bubble_2000': {'description': 'Tech Bubble Burst (-78% NASDAQ)', 'impact': -0.40},
+            'inflation_shock': {'description': 'High Inflation Environment', 'impact': -0.25},
+            'interest_rate_spike': {'description': 'Rapid Interest Rate Increases', 'impact': -0.20},
+            'geopolitical_crisis': {'description': 'Major Geopolitical Event', 'impact': -0.30}
+        }
+        
+        stress_results = {}
+        current_value = sum(holding.get('market_value', 0) for holding in holdings_data.values()) if holdings_data else 1000000
+        
+        for scenario_name, scenario in scenarios.items():
+            stressed_value = current_value * (1 + scenario['impact'])
+            loss = current_value - stressed_value
+            
+            stress_results[scenario_name] = {
+                'description': scenario['description'],
+                'portfolio_loss': loss,
+                'portfolio_loss_pct': scenario['impact'] * 100,
+                'stressed_value': stressed_value
+            }
+        
+        return stress_results
+    
+    def monte_carlo_simulation(self, returns, holdings_data, num_simulations=1000, time_horizon=252):
+        """Monte Carlo simulation for portfolio VaR"""
+        if returns.empty:
+            return {'mc_var_95': 0, 'mc_var_99': 0, 'expected_return': 0, 'simulation_results': []}
+        
+        # Calculate portfolio returns
+        portfolio_returns = self.calculate_portfolio_returns(returns, holdings_data)
+        
+        if len(portfolio_returns) == 0:
+            return {'mc_var_95': 0, 'mc_var_99': 0, 'expected_return': 0, 'simulation_results': []}
+        
+        mean_return = portfolio_returns.mean()
+        std_return = portfolio_returns.std()
+        
+        # Run Monte Carlo simulation
+        simulation_results = []
+        for _ in range(num_simulations):
+            random_returns = np.random.normal(mean_return, std_return, time_horizon)
+            final_value = np.prod(1 + random_returns)
+            simulation_results.append((final_value - 1) * 100)  # Convert to percentage
+        
+        return {
+            'mc_var_95': np.percentile(simulation_results, 5),
+            'mc_var_99': np.percentile(simulation_results, 1),
+            'expected_return': np.mean(simulation_results),
+            'simulation_results': simulation_results
+        }
+    
+    def get_default_risk_metrics(self):
+        """Return default risk metrics when calculation fails"""
+        return {
+            'portfolio_volatility': 0,
+            'individual_volatilities': {},
+            'value_at_risk_95': 0,
+            'value_at_risk_99': 0,
+            'expected_shortfall': 0,
+            'maximum_drawdown': 0,
+            'downside_deviation': 0,
+            'sharpe_ratio': 0,
+            'sortino_ratio': 0,
+            'calmar_ratio': 0,
+            'treynor_ratio': 0,
+            'correlation_matrix': pd.DataFrame(),
+            'concentration_risk': 0,
+            'factor_exposures': {},
+            'tail_risk': 0,
+            'stress_scenarios': {},
+            'monte_carlo_var': {'mc_var_95': 0, 'mc_var_99': 0, 'expected_return': 0, 'simulation_results': []},
+            'liquidity_score': 0,
+            'market_impact': 0
+        }
 
 # Currency formatting functions
 def get_currency_symbol(ticker_info):
@@ -5578,6 +5897,209 @@ def get_simple_current_price(symbol):
         print(f"Error fetching price for {symbol}: {e}")
         return 0.0
 
+def display_advanced_risk_analysis(portfolio_data, risk_analyzer):
+    """Display comprehensive risk analysis with advanced metrics and visualizations"""
+    
+    st.subheader("🎯 Advanced Risk Analysis")
+    
+    try:
+        # Calculate comprehensive risk metrics
+        risk_metrics = risk_analyzer.calculate_comprehensive_risk_metrics(portfolio_data)
+        
+        # Create columns for risk overview
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
+            st.metric(
+                "Portfolio Volatility", 
+                f"{portfolio_vol:.2%}",
+                help="Annualized portfolio volatility based on historical data"
+            )
+            
+        with col2:
+            var_95 = risk_metrics.get('value_at_risk_95', 0)
+            st.metric(
+                "95% VaR (1-day)", 
+                f"-{abs(var_95):.2%}",
+                help="Maximum expected loss over 1 day with 95% confidence"
+            )
+            
+        with col3:
+            expected_shortfall = risk_metrics.get('expected_shortfall', 0)
+            st.metric(
+                "Expected Shortfall", 
+                f"-{abs(expected_shortfall):.2%}",
+                help="Average loss in worst 5% of scenarios"
+            )
+            
+        with col4:
+            sharpe_ratio = risk_metrics.get('sharpe_ratio', 0)
+            st.metric(
+                "Sharpe Ratio", 
+                f"{sharpe_ratio:.2f}",
+                help="Risk-adjusted return measure"
+            )
+        
+        # Risk breakdown by asset
+        st.subheader("📊 Risk Contribution by Asset")
+        
+        # Create risk contribution chart
+        if 'risk_contribution' in risk_metrics:
+            risk_contrib_df = pd.DataFrame(risk_metrics['risk_contribution'].items(), 
+                                         columns=['Stock', 'Risk Contribution'])
+            risk_contrib_df['Risk Contribution %'] = risk_contrib_df['Risk Contribution'] * 100
+            
+            fig_risk = px.bar(
+                risk_contrib_df, 
+                x='Stock', 
+                y='Risk Contribution %',
+                title="Individual Risk Contribution (%)",
+                color='Risk Contribution %',
+                color_continuous_scale='Reds'
+            )
+            fig_risk.update_layout(height=400)
+            st.plotly_chart(fig_risk, use_container_width=True)
+        
+        # Correlation matrix
+        st.subheader("🔗 Asset Correlation Matrix")
+        
+        try:
+            correlation_matrix = risk_analyzer.calculate_correlation_matrix(portfolio_data)
+            if correlation_matrix is not None and not correlation_matrix.empty:
+                fig_corr = px.imshow(
+                    correlation_matrix,
+                    title="Portfolio Correlation Heatmap",
+                    color_continuous_scale='RdBu',
+                    aspect='auto'
+                )
+                fig_corr.update_layout(height=500)
+                st.plotly_chart(fig_corr, use_container_width=True)
+                
+                # Correlation insights
+                high_corr_pairs = []
+                for i in range(len(correlation_matrix.columns)):
+                    for j in range(i+1, len(correlation_matrix.columns)):
+                        corr_val = correlation_matrix.iloc[i, j]
+                        if abs(corr_val) > 0.7:  # High correlation threshold
+                            high_corr_pairs.append({
+                                'Stock 1': correlation_matrix.columns[i],
+                                'Stock 2': correlation_matrix.columns[j],
+                                'Correlation': corr_val
+                            })
+                
+                if high_corr_pairs:
+                    st.warning("⚠️ **High Correlation Alert**: The following pairs show high correlation (>70%):")
+                    for pair in high_corr_pairs[:5]:  # Show top 5
+                        st.write(f"• {pair['Stock 1']} ↔ {pair['Stock 2']}: {pair['Correlation']:.2%}")
+            else:
+                st.info("📊 Correlation matrix not available - insufficient data or calculation error")
+        except Exception as e:
+            st.warning(f"⚠️ Could not calculate correlation matrix: {str(e)}")
+            st.info("💡 This may be due to insufficient historical data or data quality issues")
+        
+        # Stress testing results
+        st.subheader("🚨 Stress Testing")
+        
+        # Get stress scenarios from risk metrics (already calculated)
+        stress_results = risk_metrics.get('stress_scenarios', {})
+        
+        # Display stress test results
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Scenario Impact on Portfolio Value:**")
+            if stress_results:
+                for scenario_name, scenario_data in stress_results.items():
+                    impact_pct = scenario_data.get('portfolio_loss_pct', 0)
+                    color = "🔴" if impact_pct < -15 else "🟡" if impact_pct < -5 else "🟢"
+                    st.write(f"{color} {scenario_name.replace('_', ' ').title()}: {impact_pct:.1f}%")
+            else:
+                st.info("Stress test data not available")
+        
+        with col2:
+            # Monte Carlo simulation
+            st.write("**Monte Carlo Simulation (1 Year):**")
+            mc_results = risk_metrics.get('monte_carlo_var', {})
+            
+            if mc_results and mc_results.get('expected_return', 0) != 0:
+                expected_return = mc_results.get('expected_return', 0)
+                mc_var_95 = mc_results.get('mc_var_95', 0)
+                mc_var_99 = mc_results.get('mc_var_99', 0)
+                
+                st.write(f"• Expected Return: {expected_return:.2f}%")
+                st.write(f"• 95% VaR: {mc_var_95:.2f}%")
+                st.write(f"• 99% VaR: {mc_var_99:.2f}%")
+                
+                # Calculate probability of loss (simplified)
+                prob_loss = max(0, min(100, 50 - expected_return))
+                st.write(f"• Est. Probability of Loss: {prob_loss:.1f}%")
+            else:
+                st.info("Monte Carlo data not available")
+        
+        # Risk-adjusted performance metrics
+        st.subheader("📈 Risk-Adjusted Performance")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            sortino = risk_metrics.get('sortino_ratio', 0)
+            st.metric("Sortino Ratio", f"{sortino:.2f}", help="Downside risk-adjusted return")
+            
+        with col2:
+            max_dd = risk_metrics.get('maximum_drawdown', 0)
+            st.metric("Max Drawdown", f"{abs(max_dd):.2%}", help="Largest peak-to-trough decline")
+            
+        with col3:
+            calmar = risk_metrics.get('calmar_ratio', 0)
+            st.metric("Calmar Ratio", f"{calmar:.2f}", help="Return vs. max drawdown")
+        
+        # Risk recommendations
+        st.subheader("💡 Risk Management Recommendations")
+        
+        recommendations = []
+        
+        # Check portfolio concentration
+        if len(portfolio_data) < 10:
+            recommendations.append("🎯 **Diversification**: Consider adding more positions to reduce concentration risk")
+        
+        # Check high correlation
+        if high_corr_pairs:
+            recommendations.append(f"🔗 **Correlation**: {len(high_corr_pairs)} high-correlation pairs detected - consider rebalancing")
+        
+        # Check volatility
+        portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
+        if portfolio_vol > 0.25:
+            recommendations.append("📊 **Volatility**: Portfolio shows high volatility - consider adding defensive positions")
+        
+        # Check VaR
+        var_95 = abs(risk_metrics.get('value_at_risk_95', 0))
+        if var_95 > 0.05:
+            recommendations.append("⚠️ **VaR**: High Value-at-Risk detected - consider risk reduction strategies")
+        
+        # Check Sharpe ratio
+        sharpe_ratio = risk_metrics.get('sharpe_ratio', 0)
+        if sharpe_ratio < 0.5 and sharpe_ratio > 0:
+            recommendations.append("📉 **Performance**: Low risk-adjusted returns - consider portfolio optimization")
+        
+        # Positive alerts for good risk management
+        if (portfolio_vol < 0.15 and var_95 < 0.02 and sharpe_ratio > 1.0):
+            recommendations.append("✅ **Excellent Risk Profile**: Portfolio shows strong risk-adjusted performance")
+        
+        # Display recommendations
+        if recommendations:
+            for rec in recommendations:
+                if "✅" in rec:
+                    st.success(rec)
+                else:
+                    st.warning(rec)
+        else:
+            st.success("✅ **Portfolio Risk Profile**: Your portfolio shows well-managed risk characteristics")
+            
+    except Exception as e:
+        st.error(f"Error in risk analysis: {str(e)}")
+        st.info("Risk analysis requires portfolio data with sufficient history for calculation")
+
 class StockDataManager:
     """Centralized stock data management with consistent caching"""
     
@@ -6002,33 +6524,252 @@ def generate_weekly_portfolio_report(portfolio_symbols):
         mime="text/plain"
     )
 
-def check_portfolio_alerts(portfolio_symbols):
-    """Check for portfolio alerts based on score changes"""
-    # This would typically compare current scores with historical scores
-    # For now, it's a placeholder for the alert system
+def check_portfolio_alerts(portfolio_symbols, portfolio_data=None, risk_analyzer=None):
+    """Check for portfolio alerts based on score changes and advanced risk metrics"""
     alerts = []
     
-    # Simulate some alerts for demonstration
-    if len(portfolio_symbols) > 0:
-        sample_alert = {
-            'type': 'info',
-            'message': f"Portfolio monitoring active for {len(portfolio_symbols)} stocks",
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
-        }
-        alerts.append(sample_alert)
+    try:
+        # Basic portfolio monitoring
+        if len(portfolio_symbols) > 0:
+            basic_alert = {
+                'type': 'info',
+                'message': f"Portfolio monitoring active for {len(portfolio_symbols)} stocks",
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
+            }
+            alerts.append(basic_alert)
+        
+        # Advanced risk-based alerts (if data and analyzer available)
+        if portfolio_data is not None and risk_analyzer is not None and not portfolio_data.empty:
+            try:
+                # Calculate comprehensive risk metrics
+                risk_metrics = risk_analyzer.calculate_comprehensive_risk_metrics(portfolio_data)
+                
+                # Alert thresholds
+                HIGH_VOLATILITY_THRESHOLD = 0.30  # 30% annual volatility
+                HIGH_VAR_THRESHOLD = 0.05         # 5% daily VaR
+                HIGH_CORRELATION_THRESHOLD = 0.80  # 80% correlation
+                LOW_SHARPE_THRESHOLD = 0.5        # Sharpe ratio below 0.5
+                
+                # Volatility alerts
+                portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
+                if portfolio_vol > HIGH_VOLATILITY_THRESHOLD:
+                    alerts.append({
+                        'type': 'warning',
+                        'message': f"🚨 High Portfolio Volatility: {portfolio_vol:.2%} (Threshold: {HIGH_VOLATILITY_THRESHOLD:.0%})",
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        'category': 'Risk'
+                    })
+                
+                # VaR alerts
+                var_95 = abs(risk_metrics.get('value_at_risk_95', 0))
+                if var_95 > HIGH_VAR_THRESHOLD:
+                    alerts.append({
+                        'type': 'error',
+                        'message': f"⚠️ High Value-at-Risk: {var_95:.2%} daily loss potential (Threshold: {HIGH_VAR_THRESHOLD:.2%})",
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        'category': 'Risk'
+                    })
+                
+                # Sharpe ratio alerts
+                sharpe_ratio = risk_metrics.get('sharpe_ratio', 0)
+                if sharpe_ratio < LOW_SHARPE_THRESHOLD and sharpe_ratio > 0:
+                    alerts.append({
+                        'type': 'warning',
+                        'message': f"📉 Low Risk-Adjusted Returns: Sharpe ratio {sharpe_ratio:.2f} (Threshold: {LOW_SHARPE_THRESHOLD})",
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        'category': 'Performance'
+                    })
+                
+                # Correlation alerts - use the correlation matrix from risk metrics
+                try:
+                    correlation_matrix = risk_metrics.get('correlation_matrix', pd.DataFrame())
+                    if correlation_matrix is not None and not correlation_matrix.empty:
+                        high_corr_count = 0
+                        for i in range(len(correlation_matrix.columns)):
+                            for j in range(i+1, len(correlation_matrix.columns)):
+                                if abs(correlation_matrix.iloc[i, j]) > HIGH_CORRELATION_THRESHOLD:
+                                    high_corr_count += 1
+                        
+                        if high_corr_count > 0:
+                            alerts.append({
+                                'type': 'warning',
+                                'message': f"🔗 High Correlation Risk: {high_corr_count} asset pairs show >80% correlation",
+                                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                'category': 'Diversification'
+                            })
+                except Exception as e:
+                    # Silently handle correlation calculation errors
+                    pass
+                
+                # Concentration risk alerts
+                if len(portfolio_data) < 10:
+                    alerts.append({
+                        'type': 'info',
+                        'message': f"🎯 Low Diversification: Only {len(portfolio_data)} holdings - consider adding more positions",
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        'category': 'Diversification'
+                    })
+                
+                # Stress test alerts - use the stress scenarios from risk metrics
+                stress_scenarios = risk_metrics.get('stress_scenarios', {})
+                
+                for scenario_name, scenario_data in stress_scenarios.items():
+                    impact_pct = scenario_data.get('portfolio_loss_pct', 0)
+                    impact = impact_pct / 100  # Convert to decimal for comparison
+                    
+                    if impact < -20:  # More than 20% loss in stress scenario
+                        alerts.append({
+                            'type': 'error',
+                            'message': f"🚨 Severe Stress Impact: {scenario_name.replace('_', ' ').title()} scenario shows {impact:.2%} portfolio loss",
+                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            'category': 'Stress Test'
+                        })
+                    elif impact < -10:  # More than 10% loss
+                        alerts.append({
+                            'type': 'warning',
+                            'message': f"⚠️ Moderate Stress Impact: {scenario_name.replace('_', ' ').title()} scenario shows {impact:.2%} portfolio loss",
+                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            'category': 'Stress Test'
+                        })
+                
+                # Positive alerts for good risk management
+                portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
+                var_95 = abs(risk_metrics.get('value_at_risk_95', 0))
+                
+                if (portfolio_vol < 0.15 and var_95 < 0.02 and sharpe_ratio > 1.0):
+                    alerts.append({
+                        'type': 'success',
+                        'message': f"✅ Excellent Risk Profile: Low volatility ({portfolio_vol:.2%}), High Sharpe ({sharpe_ratio:.2f})",
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        'category': 'Performance'
+                    })
+                
+            except Exception as risk_error:
+                # Don't fail the whole function if advanced risk analysis fails
+                alerts.append({
+                    'type': 'info',
+                    'message': f"Risk analysis unavailable: {str(risk_error)[:50]}...",
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    'category': 'System'
+                })
+    
+    except Exception as e:
+        # Fallback alert
+        alerts.append({
+            'type': 'error',
+            'message': f"Alert system error: {str(e)[:50]}...",
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+            'category': 'System'
+        })
     
     # Add to alert history
     if 'alert_history' not in st.session_state:
         st.session_state.alert_history = []
     
     for alert in alerts:
-        st.session_state.alert_history.append(alert)
+        # Avoid duplicate alerts (check last 5 alerts)
+        recent_alerts = st.session_state.alert_history[-5:] if len(st.session_state.alert_history) >= 5 else st.session_state.alert_history
+        is_duplicate = any(
+            recent_alert.get('message', '') == alert.get('message', '') and
+            recent_alert.get('category', '') == alert.get('category', '')
+            for recent_alert in recent_alerts
+        )
+        
+        if not is_duplicate:
+            st.session_state.alert_history.append(alert)
     
-    # Keep only last 50 alerts
-    if len(st.session_state.alert_history) > 50:
-        st.session_state.alert_history = st.session_state.alert_history[-50:]
+    # Keep only last 100 alerts (increased from 50 for better history)
+    if len(st.session_state.alert_history) > 100:
+        st.session_state.alert_history = st.session_state.alert_history[-100:]
     
     return alerts
+
+def display_portfolio_alerts():
+    """Display portfolio alerts in an organized, user-friendly format"""
+    
+    if 'alert_history' not in st.session_state or not st.session_state.alert_history:
+        st.info("📋 No portfolio alerts yet. Alerts will appear here as the system monitors your portfolio.")
+        return
+    
+    st.subheader("🔔 Portfolio Risk Alerts")
+    
+    # Get recent alerts (last 24 hours)
+    recent_alerts = []
+    older_alerts = []
+    
+    current_time = datetime.now()
+    
+    for alert in reversed(st.session_state.alert_history):  # Show most recent first
+        try:
+            alert_time = datetime.strptime(alert['timestamp'], "%Y-%m-%d %H:%M")
+            time_diff = current_time - alert_time
+            
+            if time_diff.total_seconds() < 86400:  # 24 hours
+                recent_alerts.append(alert)
+            else:
+                older_alerts.append(alert)
+        except:
+            older_alerts.append(alert)  # If timestamp parsing fails, put in older
+    
+    # Display recent alerts
+    if recent_alerts:
+        st.markdown("### 🕐 Recent Alerts (Last 24 Hours)")
+        
+        for alert in recent_alerts[:10]:  # Show top 10 recent alerts
+            alert_type = alert.get('type', 'info')
+            message = alert.get('message', 'No message')
+            timestamp = alert.get('timestamp', 'Unknown time')
+            category = alert.get('category', 'General')
+            
+            # Choose appropriate Streamlit alert function and emoji
+            if alert_type == 'error':
+                st.error(f"**{category}** • {timestamp}\n\n{message}")
+            elif alert_type == 'warning':
+                st.warning(f"**{category}** • {timestamp}\n\n{message}")
+            elif alert_type == 'success':
+                st.success(f"**{category}** • {timestamp}\n\n{message}")
+            else:
+                st.info(f"**{category}** • {timestamp}\n\n{message}")
+    
+    # Display older alerts in an expander
+    if older_alerts:
+        with st.expander(f"📚 Alert History ({len(older_alerts)} older alerts)", expanded=False):
+            
+            # Group by category
+            categories = {}
+            for alert in older_alerts[:50]:  # Limit to 50 older alerts
+                category = alert.get('category', 'General')
+                if category not in categories:
+                    categories[category] = []
+                categories[category].append(alert)
+            
+            for category, cat_alerts in categories.items():
+                st.markdown(f"**{category} Alerts:**")
+                for alert in cat_alerts[:10]:  # Top 10 per category
+                    alert_type = alert.get('type', 'info')
+                    message = alert.get('message', 'No message')
+                    timestamp = alert.get('timestamp', 'Unknown time')
+                    
+                    icon = {"error": "🔴", "warning": "🟡", "success": "🟢", "info": "🔵"}.get(alert_type, "🔵")
+                    st.markdown(f"{icon} `{timestamp}` {message}")
+                
+                st.markdown("---")
+    
+    # Alert summary
+    if recent_alerts or older_alerts:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            error_count = sum(1 for alert in recent_alerts if alert.get('type') == 'error')
+            st.metric("🔴 Critical Alerts", error_count)
+        
+        with col2:
+            warning_count = sum(1 for alert in recent_alerts if alert.get('type') == 'warning')
+            st.metric("🟡 Warning Alerts", warning_count)
+        
+        with col3:
+            success_count = sum(1 for alert in recent_alerts if alert.get('type') == 'success')
+            st.metric("🟢 Positive Alerts", success_count)
 
 
 # --- Portfolio Rebalancing Functions ---
@@ -7090,14 +7831,14 @@ def main():
                     holdings = enhanced_manager.portfolio_db.get_current_holdings()
                     
                     if not holdings.empty:
-                        selected_symbol = st.selectbox("Select holding to edit:", holdings['symbol'].tolist())
+                        selected_symbol = st.selectbox("Select holding to edit:", holdings['symbol'].tolist(), key="edit_holdings_selectbox")
                         
                         if selected_symbol:
                             current_holding = holdings[holdings['symbol'] == selected_symbol].iloc[0]
                             
                             col1, col2 = st.columns(2)
                             with col1:
-                                if st.button("🗑️ Remove Holding", type="secondary"):
+                                if st.button("🗑️ Remove Holding", type="secondary", key=f"remove_holding_{selected_symbol}"):
                                     try:
                                         success = enhanced_manager.portfolio_db.remove_holding(selected_symbol)
                                         if success:
@@ -7110,7 +7851,7 @@ def main():
                                         st.error(f"❌ Error removing holding: {e}")
                             
                             with col2:
-                                if st.button("📊 View Details", type="secondary"):
+                                if st.button("📊 View Details", type="secondary", key=f"view_details_{selected_symbol}"):
                                     try:
                                         st.info(f"**{selected_symbol}**\n"
                                                f"Quantity: {current_holding['quantity']}\n"
@@ -7139,15 +7880,15 @@ def main():
                         col1, col2, col3 = st.columns(3)
                         
                         with col1:
-                            alert_symbol = st.selectbox("Stock Symbol", holdings['symbol'].tolist())
+                            alert_symbol = st.selectbox("Stock Symbol", holdings['symbol'].tolist(), key="alert_symbol_selectbox")
                         
                         with col2:
-                            alert_type = st.selectbox("Alert Type", ["Price Above", "Price Below", "% Change"])
+                            alert_type = st.selectbox("Alert Type", ["Price Above", "Price Below", "% Change"], key="alert_type_selectbox")
                         
                         with col3:
-                            alert_value = st.number_input("Alert Value", min_value=0.01, value=100.0, step=0.01)
+                            alert_value = st.number_input("Alert Value", min_value=0.01, value=100.0, step=0.01, key="alert_value_input")
                         
-                        if st.button("🔔 Create Alert"):
+                        if st.button("🔔 Create Alert", key="create_portfolio_alert"):
                             st.success(f"✅ Alert created: {alert_symbol} {alert_type} {alert_value}")
                         
                         # Sample alerts display
@@ -7234,7 +7975,7 @@ def main():
                         # Quick add to portfolio
                         selected_stocks = st.multiselect("Select stocks to add:", sample_results['Symbol'])
                         
-                        if selected_stocks and st.button("➕ Add Selected to Portfolio"):
+                        if selected_stocks and st.button("➕ Add Selected to Portfolio", key="add_selected_to_portfolio"):
                             for symbol in selected_stocks:
                                 if enhanced_manager.portfolio_db:
                                     enhanced_manager.portfolio_db.add_holding(symbol, 1.0, 100.0)
@@ -7260,7 +8001,7 @@ def main():
                                 # Add clear functionality here
                                 st.warning("Clear functionality to be implemented")
                         
-                        if st.button("📥 Export Portfolio", type="secondary"):
+                        if st.button("📥 Export Portfolio", type="secondary", key="export_portfolio_btn"):
                             holdings = enhanced_manager.portfolio_db.get_current_holdings()
                             if not holdings.empty:
                                 csv = holdings.to_csv(index=False)
@@ -7278,7 +8019,7 @@ def main():
                     if hasattr(st.session_state, 'portfolio') and st.session_state.portfolio:
                         st.info(f"Found {len(st.session_state.portfolio)} stocks in legacy format")
                         
-                        if st.button("🔄 Migrate Legacy Portfolio", type="primary"):
+                        if st.button("🔄 Migrate Legacy Portfolio", type="primary", key="migrate_legacy_portfolio"):
                             migrated_count = 0
                             for symbol in st.session_state.portfolio:
                                 try:
@@ -7332,11 +8073,17 @@ def main():
                     if enhanced_manager.portfolio_db:
                         current_holdings = enhanced_manager.portfolio_db.get_current_holdings()
                         
+                        # Check if portfolio was just created
+                        portfolio_just_created = st.session_state.get('sample_portfolio_created', False)
+                        if portfolio_just_created:
+                            st.session_state.sample_portfolio_created = False  # Reset flag
+                            current_holdings = enhanced_manager.portfolio_db.get_current_holdings()  # Refresh data
+                        
                         if current_holdings.empty:
                             st.warning("⚠️ No current portfolio found. Add some holdings first in the Portfolio Manager.")
                             st.markdown("### 🆕 Create Sample Portfolio for Testing")
                             
-                            if st.button("🚀 Create Sample Portfolio", type="primary"):
+                            if st.button("🚀 Create Sample Portfolio", type="primary", key="create_sample_portfolio"):
                                 # Add sample holdings
                                 sample_stocks = [
                                     ("AAPL", 10, 150.0),
@@ -7349,8 +8096,9 @@ def main():
                                 for symbol, quantity, price in sample_stocks:
                                     enhanced_manager.portfolio_db.add_holding(symbol, quantity, price)
                                 
-                                st.success("✅ Sample portfolio created! Refresh to continue.")
-                                st.rerun()
+                                st.session_state.sample_portfolio_created = True  # Set flag for next run
+                                st.success("✅ Sample portfolio created! Continue building your scenario below.")
+                                # Don't use st.rerun() to avoid tab reset - let user continue in same tab
                         else:
                             st.markdown("### 🔄 Modify Your Portfolio")
                             st.info(f"Current portfolio has {len(current_holdings)} holdings")
@@ -7372,19 +8120,24 @@ def main():
                             scenario_changes = []
                             
                             if modification_type == "Add New Stock":
-                                with st.form("what_if_add_stock_form"):
+                                with st.form("what_if_add_stock_form", clear_on_submit=True):
                                     col1, col2, col3 = st.columns(3)
                                     with col1:
                                         new_symbol = st.text_input("Stock Symbol", placeholder="AAPL", key="what_if_new_symbol").upper()
                                     with col2:
-                                        new_quantity = st.number_input("Quantity", min_value=1, value=10)
+                                        new_quantity = st.number_input("Quantity", min_value=1, value=10, key="what_if_new_quantity")
                                     with col3:
-                                        target_price = st.number_input("Target Price", min_value=0.01, value=100.0)
+                                        target_price = st.number_input("Target Price", min_value=0.01, value=100.0, key="what_if_target_price")
                                     
                                     submitted = st.form_submit_button("➕ Add to Scenario")
                                 
-                                if new_symbol and submitted:
-                                    scenario_changes.append({
+                                if submitted and new_symbol:
+                                    # Initialize scenario changes in session state if not exists
+                                    if 'what_if_scenario_changes' not in st.session_state:
+                                        st.session_state.what_if_scenario_changes = []
+                                    
+                                    # Add to session state scenario changes
+                                    st.session_state.what_if_scenario_changes.append({
                                         'action': 'add',
                                         'symbol': new_symbol,
                                         'quantity': new_quantity,
@@ -7395,12 +8148,17 @@ def main():
                             elif modification_type == "Remove Stock":
                                 symbols_to_remove = st.multiselect(
                                     "Select stocks to remove:",
-                                    current_holdings['symbol'].tolist()
+                                    current_holdings['symbol'].tolist(),
+                                    key="what_if_remove_symbols"
                                 )
                                 
-                                if symbols_to_remove and st.button("🗑️ Remove from Scenario"):
+                                if symbols_to_remove and st.button("🗑️ Remove from Scenario", key="what_if_remove_button"):
+                                    # Initialize scenario changes in session state if not exists
+                                    if 'what_if_scenario_changes' not in st.session_state:
+                                        st.session_state.what_if_scenario_changes = []
+                                    
                                     for symbol in symbols_to_remove:
-                                        scenario_changes.append({
+                                        st.session_state.what_if_scenario_changes.append({
                                             'action': 'remove',
                                             'symbol': symbol
                                         })
@@ -7409,7 +8167,8 @@ def main():
                             elif modification_type == "Change Quantity":
                                 symbol_to_change = st.selectbox(
                                     "Select stock to modify:",
-                                    current_holdings['symbol'].tolist()
+                                    current_holdings['symbol'].tolist(),
+                                    key="what_if_change_symbol"
                                 )
                                 
                                 if symbol_to_change:
@@ -7417,62 +8176,90 @@ def main():
                                     new_qty = st.number_input(
                                         f"New quantity for {symbol_to_change}",
                                         min_value=0,
-                                        value=int(current_qty)
+                                        value=int(current_qty),
+                                        key="what_if_new_qty"
                                     )
                                     
-                                    if st.button("🔄 Update Quantity"):
-                                        scenario_changes.append({
+                                    if st.button("🔄 Update Quantity", key="what_if_update_quantity_button"):
+                                        # Initialize scenario changes in session state if not exists
+                                        if 'what_if_scenario_changes' not in st.session_state:
+                                            st.session_state.what_if_scenario_changes = []
+                                        
+                                        st.session_state.what_if_scenario_changes.append({
                                             'action': 'update_quantity',
                                             'symbol': symbol_to_change,
                                             'quantity': new_qty
                                         })
                                         st.success(f"✅ Updated {symbol_to_change} quantity")
                             
-                            # Store scenario in session state
-                            if scenario_changes:
-                                st.session_state.what_if_scenario = scenario_changes
+                            # Display current scenario changes
+                            if 'what_if_scenario_changes' in st.session_state and st.session_state.what_if_scenario_changes:
+                                st.markdown("### 📝 Current Scenario Changes")
+                                for i, change in enumerate(st.session_state.what_if_scenario_changes):
+                                    col1, col2 = st.columns([4, 1])
+                                    with col1:
+                                        if change['action'] == 'add':
+                                            st.write(f"➕ Add {change['quantity']} shares of {change['symbol']} at ${change['price']:.2f}")
+                                        elif change['action'] == 'remove':
+                                            st.write(f"🗑️ Remove {change['symbol']}")
+                                        elif change['action'] == 'update_quantity':
+                                            st.write(f"🔄 Update {change['symbol']} to {change['quantity']} shares")
+                                    with col2:
+                                        if st.button("❌", key=f"remove_change_{i}", help="Remove this change"):
+                                            st.session_state.what_if_scenario_changes.pop(i)
+                                            st.rerun()
+                                
+                                # Add clear all button
+                                col1, col2 = st.columns([1, 1])
+                                with col1:
+                                    if st.button("🧮 Analyze Scenario", type="primary", key="analyze_scenario_button"):
+                                        scenario_changes = st.session_state.what_if_scenario_changes
+                                        if scenario_changes:
+                                            with st.spinner("🔄 Analyzing scenario..."):
+                                                try:
+                                                    # Build portfolio scenario
+                                                    current_portfolio = {}
+                                                    for _, holding in current_holdings.iterrows():
+                                                        current_portfolio[holding['symbol']] = {
+                                                            'shares': holding['quantity'],  # Use 'shares' instead of 'quantity'
+                                                            'cost_basis': holding['average_cost']
+                                                        }
+                                                    
+                                                    # Apply changes
+                                                    scenario_portfolio = current_portfolio.copy()
+                                                    for change in scenario_changes:
+                                                        if change['action'] == 'add':
+                                                            scenario_portfolio[change['symbol']] = {
+                                                                'shares': change['quantity'],  # Use 'shares' instead of 'quantity'
+                                                                'cost_basis': change['price']
+                                                            }
+                                                        elif change['action'] == 'remove':
+                                                            scenario_portfolio.pop(change['symbol'], None)
+                                                        elif change['action'] == 'update_quantity':
+                                                            if change['symbol'] in scenario_portfolio:
+                                                                scenario_portfolio[change['symbol']]['shares'] = change['quantity']  # Use 'shares'
+                                                    
+                                                    # Analyze scenario
+                                                    analysis = what_if.analyze_portfolio_scenario(
+                                                        current_portfolio,
+                                                        scenario_portfolio,
+                                                        scenario_name="Custom Scenario"
+                                                    )
+                                                    
+                                                    st.session_state.what_if_analysis = analysis
+                                                    st.success("✅ Scenario analysis complete! Check other tabs for results.")
+                                                    
+                                                except Exception as e:
+                                                    st.error(f"❌ Analysis error: {e}")
+                                        else:
+                                            st.warning("⚠️ No scenario changes defined")
+                                with col2:
+                                    if st.button("🗑️ Clear All Changes", key="clear_scenario_button"):
+                                        st.session_state.what_if_scenario_changes = []
+                                        st.success("✅ All scenario changes cleared")
                             
-                            # Analyze scenario button
-                            if st.button("🧮 Analyze Scenario", type="primary"):
-                                if 'what_if_scenario' in st.session_state:
-                                    with st.spinner("🔄 Analyzing scenario..."):
-                                        try:
-                                            # Build portfolio scenario
-                                            current_portfolio = {}
-                                            for _, holding in current_holdings.iterrows():
-                                                current_portfolio[holding['symbol']] = {
-                                                    'shares': holding['quantity'],  # Use 'shares' instead of 'quantity'
-                                                    'cost_basis': holding['average_cost']
-                                                }
-                                            
-                                            # Apply changes
-                                            scenario_portfolio = current_portfolio.copy()
-                                            for change in st.session_state.what_if_scenario:
-                                                if change['action'] == 'add':
-                                                    scenario_portfolio[change['symbol']] = {
-                                                        'shares': change['quantity'],  # Use 'shares' instead of 'quantity'
-                                                        'cost_basis': change['price']
-                                                    }
-                                                elif change['action'] == 'remove':
-                                                    scenario_portfolio.pop(change['symbol'], None)
-                                                elif change['action'] == 'update_quantity':
-                                                    if change['symbol'] in scenario_portfolio:
-                                                        scenario_portfolio[change['symbol']]['shares'] = change['quantity']  # Use 'shares'
-                                            
-                                            # Analyze scenario
-                                            analysis = what_if.analyze_portfolio_scenario(
-                                                current_portfolio,
-                                                scenario_portfolio,
-                                                scenario_name="Custom Scenario"
-                                            )
-                                            
-                                            st.session_state.what_if_analysis = analysis
-                                            st.success("✅ Scenario analysis complete! Check other tabs for results.")
-                                            
-                                        except Exception as e:
-                                            st.error(f"❌ Analysis error: {e}")
-                                else:
-                                    st.warning("⚠️ No scenario changes defined")
+                            else:
+                                st.info("💡 Add modifications above to build your scenario")
                     else:
                         st.error("❌ Portfolio database not available")
                 
@@ -7609,14 +8396,26 @@ def main():
                             st.markdown("### 🎯 Recommended Actions")
                             
                             for i, rec in enumerate(recommendations):
-                                with st.expander(f"💡 {rec.get('title', f'Recommendation {i+1}')}"):
-                                    st.write(rec.get('description', ''))
-                                    if 'impact' in rec:
-                                        st.info(f"**Expected Impact:** {rec['impact']}")
-                                    if 'confidence' in rec:
-                                        confidence = rec['confidence']
-                                        color = "green" if confidence > 0.7 else "orange" if confidence > 0.5 else "red"
-                                        st.markdown(f"**Confidence:** <span style='color: {color}'>{confidence:.0%}</span>", unsafe_allow_html=True)
+                                # Handle both string and dictionary formats
+                                if isinstance(rec, dict):
+                                    # Dictionary format with title, description, etc.
+                                    title = rec.get('title', f'Recommendation {i+1}')
+                                    description = rec.get('description', '')
+                                    impact = rec.get('impact', '')
+                                    confidence = rec.get('confidence', 0)
+                                    
+                                    with st.expander(f"💡 {title}"):
+                                        if description:
+                                            st.write(description)
+                                        if impact:
+                                            st.info(f"**Expected Impact:** {impact}")
+                                        if confidence > 0:
+                                            color = "green" if confidence > 0.7 else "orange" if confidence > 0.5 else "red"
+                                            st.markdown(f"**Confidence:** <span style='color: {color}'>{confidence:.0%}</span>", unsafe_allow_html=True)
+                                else:
+                                    # String format - simple recommendation text
+                                    with st.expander(f"💡 Recommendation {i+1}"):
+                                        st.write(str(rec))
                         else:
                             st.info("📊 No specific recommendations available for this scenario")
                             
@@ -7637,69 +8436,139 @@ def main():
                         st.info("💡 No analysis available. Create a scenario first to get recommendations.")
                 
                 with whatif_tab4:
-                    st.subheader("🧮 Risk Analysis")
+                    st.subheader("🧮 Advanced Risk Analysis")
                     
                     if 'what_if_analysis' in st.session_state:
                         analysis = st.session_state.what_if_analysis
                         
-                        st.markdown("### ⚠️ Risk Assessment")
+                        # Initialize risk analyzer
+                        risk_analyzer = AdvancedRiskAnalyzer()
                         
-                        current_metrics = analysis['current_metrics']
-                        scenario_metrics = analysis['simulated_metrics']
+                        # Create portfolio data from current holdings
+                        current_holdings = enhanced_manager.portfolio_db.get_current_holdings()
                         
-                        # Use volatility_estimate as a proxy for risk
-                        current_risk = current_metrics.volatility_estimate
-                        scenario_risk = scenario_metrics.volatility_estimate
-                        risk_change = scenario_risk - current_risk
+                        if not current_holdings.empty:
+                            st.markdown("### 🎯 Current Portfolio Risk Profile")
+                            
+                            # Display advanced risk analysis for current portfolio
+                            display_advanced_risk_analysis(current_holdings, risk_analyzer)
+                            
+                            st.markdown("---")
+                            
+                            # Scenario comparison if available
+                            current_metrics = analysis['current_metrics']
+                            scenario_metrics = analysis['simulated_metrics']
+                            
+                            st.markdown("### 📊 Scenario vs Current Risk Comparison")
+                            
+                            # Basic comparison metrics
+                            current_risk = current_metrics.volatility_estimate
+                            scenario_risk = scenario_metrics.volatility_estimate
+                            risk_change = scenario_risk - current_risk
+                            
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                st.metric("Current Volatility", f"{current_risk:.1f}%")
+                            
+                            with col2:
+                                st.metric("Scenario Volatility", f"{scenario_risk:.1f}%", f"{risk_change:+.1f}%")
+                            
+                            with col3:
+                                risk_level = "Low" if scenario_risk < 15 else "Medium" if scenario_risk < 25 else "High"
+                                color = "green" if scenario_risk < 15 else "orange" if scenario_risk < 25 else "red"
+                                st.markdown(f"**Risk Level:** <span style='color: {color}'>{risk_level}</span>", unsafe_allow_html=True)
+                            
+                            # Advanced scenario impact analysis
+                            st.markdown("### � Scenario Impact Analysis")
+                            
+                            impact_col1, impact_col2 = st.columns(2)
+                            
+                            with impact_col1:
+                                st.markdown("**🔶 Risk Impact Summary:**")
+                                
+                                # Calculate risk impact categories
+                                if abs(risk_change) < 2:
+                                    impact_level = "Minimal"
+                                    impact_color = "green"
+                                elif abs(risk_change) < 5:
+                                    impact_level = "Moderate"
+                                    impact_color = "orange"
+                                else:
+                                    impact_level = "Significant"
+                                    impact_color = "red"
+                                
+                                st.markdown(f"• **Impact Level:** <span style='color: {impact_color}'>{impact_level}</span>", unsafe_allow_html=True)
+                                st.write(f"• **Volatility Change:** {risk_change:+.1f} percentage points")
+                                
+                                # Risk direction
+                                if risk_change > 0:
+                                    st.write("• **Direction:** ⬆️ Increased Risk")
+                                    st.warning("📈 Scenario increases portfolio risk")
+                                elif risk_change < 0:
+                                    st.write("• **Direction:** ⬇️ Reduced Risk")
+                                    st.success("📉 Scenario reduces portfolio risk")
+                                else:
+                                    st.write("• **Direction:** ➡️ Neutral Impact")
+                                    st.info("➖ Scenario has minimal risk impact")
+                            
+                            with impact_col2:
+                                st.markdown("**📋 Key Risk Factors:**")
+                                
+                                risk_factors = {
+                                    "Concentration Risk": "Portfolio diversification level",
+                                    "Volatility Risk": "Expected price fluctuation", 
+                                    "Correlation Risk": "Asset interdependence",
+                                    "Liquidity Risk": "Trading ease and market depth",
+                                    "Market Risk": "Systematic market exposure"
+                                }
+                                
+                                # Mock enhanced risk scores (in production, calculate from actual data)
+                                for factor, description in risk_factors.items():
+                                    factor_score = min(10, max(1, scenario_risk/3 + np.random.uniform(-1, 1)))
+                                    progress_color = "🟢" if factor_score < 4 else "🟡" if factor_score < 7 else "🔴"
+                                    st.write(f"{progress_color} **{factor}**: {factor_score:.1f}/10")
+                            
+                            # Risk mitigation recommendations
+                            st.markdown("### 🛡️ Scenario-Specific Risk Mitigation")
+                            
+                            recommendations = []
+                            
+                            # Dynamic recommendations based on scenario risk
+                            if scenario_risk > current_risk + 3:
+                                recommendations.extend([
+                                    "⚠️ **High Risk Increase**: Consider reducing position sizes in volatile stocks",
+                                    "🎯 **Diversification**: Add defensive or low-beta stocks to balance risk",
+                                    "🛡️ **Hedging**: Consider protective options or inverse ETFs"
+                                ])
+                            elif scenario_risk < current_risk - 2:
+                                recommendations.extend([
+                                    "✅ **Risk Reduction**: Good scenario for risk-averse investors",
+                                    "📈 **Opportunity**: Lower risk may allow for modest position increases",
+                                    "⚖️ **Balance**: Ensure returns still meet investment objectives"
+                                ])
+                            else:
+                                recommendations.extend([
+                                    "🎯 **Balanced Approach**: Risk level remains manageable",
+                                    "🔄 **Monitor**: Regular review recommended for position adjustments"
+                                ])
+                            
+                            # Universal risk management strategies
+                            recommendations.extend([
+                                "🏭 **Sector Limits**: Keep any single sector under 30% of portfolio",
+                                "💰 **Position Sizing**: Limit individual positions to 5-10% of total",
+                                "⏰ **Time Diversification**: Consider dollar-cost averaging for new positions",
+                                "� **Regular Rebalancing**: Review and adjust quarterly"
+                            ])
+                            
+                            for rec in recommendations:
+                                st.markdown(rec)
                         
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric("Current Volatility", f"{current_risk:.1f}%")
-                        
-                        with col2:
-                            st.metric("Scenario Volatility", f"{scenario_risk:.1f}%", f"{risk_change:+.1f}%")
-                        
-                        with col3:
-                            risk_level = "Low" if scenario_risk < 15 else "Medium" if scenario_risk < 25 else "High"
-                            color = "green" if scenario_risk < 15 else "orange" if scenario_risk < 25 else "red"
-                            st.markdown(f"**Risk Level:** <span style='color: {color}'>{risk_level}</span>", unsafe_allow_html=True)
-                        
-                        # Risk factors
-                        st.markdown("### 📊 Risk Factors Analysis")
-                        
-                        risk_factors = {
-                            "Concentration Risk": "How much of portfolio is in single stocks/sectors",
-                            "Volatility Risk": "Expected price fluctuation based on historical data", 
-                            "Correlation Risk": "How similarly stocks move together",
-                            "Liquidity Risk": "Ability to quickly buy/sell without affecting price",
-                            "Market Risk": "Overall market conditions impact"
-                        }
-                        
-                        for factor, description in risk_factors.items():
-                            with st.expander(f"📋 {factor}"):
-                                st.write(description)
-                                # Mock risk score for each factor
-                                factor_score = np.random.uniform(3, 8)
-                                st.progress(factor_score/10, text=f"Risk Level: {factor_score:.1f}/10")
-                        
-                        # Risk mitigation suggestions
-                        st.markdown("### 🛡️ Risk Mitigation Strategies")
-                        
-                        mitigation_strategies = [
-                            "🎯 **Diversify Holdings**: Spread investments across 15-20 different stocks",
-                            "🏭 **Sector Balance**: Limit any single sector to <30% of portfolio",
-                            "🌍 **Geographic Spread**: Consider international exposure",
-                            "⏰ **Time Horizon**: Longer investment periods reduce short-term volatility impact",
-                            "💰 **Position Sizing**: Limit individual positions to 5-10% of total portfolio",
-                            "🔄 **Regular Review**: Monitor and rebalance quarterly"
-                        ]
-                        
-                        for strategy in mitigation_strategies:
-                            st.markdown(strategy)
+                        else:
+                            st.warning("⚠️ No current portfolio found. Add holdings in Portfolio Manager for comprehensive risk analysis.")
                             
                     else:
-                        st.info("🧮 No risk analysis available. Create a scenario first.")
+                        st.info("🧮 No risk analysis available. Create a scenario first to compare risk profiles.")
                         
             else:
                 st.error("❌ What-If Analyzer not available")
@@ -8655,6 +9524,110 @@ def run_portfolio_alerts():
                 
         except Exception as e:
             st.error(f"Error calculating portfolio risk: {str(e)}")
+        
+        # Advanced Risk Analysis Integration
+        st.markdown("---")
+        st.markdown("### 🎯 Advanced Risk Analysis")
+        
+        try:
+            # Prepare portfolio data for advanced analysis
+            portfolio_data = []
+            for symbol in symbols:
+                holding = st.session_state.portfolio_holdings[symbol]
+                if holding["purchase_price"] > 0:
+                    portfolio_data.append({
+                        'Symbol': symbol,
+                        'Quantity': holding["quantity"],
+                        'Purchase_Price': holding["purchase_price"]
+                    })
+            
+            if portfolio_data:
+                portfolio_df = pd.DataFrame(portfolio_data)
+                
+                # Initialize risk analyzer
+                risk_analyzer = AdvancedRiskAnalyzer()
+                
+                # Run advanced risk alerts
+                advanced_alerts = check_portfolio_alerts(
+                    portfolio_symbols=symbols,
+                    portfolio_data=portfolio_df, 
+                    risk_analyzer=risk_analyzer
+                )
+                
+                # Display advanced risk alerts
+                if advanced_alerts:
+                    st.markdown("#### 🔔 Risk-Based Alerts")
+                    
+                    # Categorize alerts
+                    critical_alerts = [a for a in advanced_alerts if a.get('type') == 'error']
+                    warning_alerts = [a for a in advanced_alerts if a.get('type') == 'warning']
+                    info_alerts = [a for a in advanced_alerts if a.get('type') in ['info', 'success']]
+                    
+                    # Show critical alerts first
+                    if critical_alerts:
+                        st.markdown("**🚨 Critical Risk Alerts:**")
+                        for alert in critical_alerts[:3]:  # Show top 3 critical
+                            st.error(f"**{alert.get('category', 'Risk')}**: {alert.get('message', 'No message')}")
+                    
+                    # Show warnings
+                    if warning_alerts:
+                        st.markdown("**⚠️ Risk Warnings:**")
+                        for alert in warning_alerts[:3]:  # Show top 3 warnings
+                            st.warning(f"**{alert.get('category', 'Risk')}**: {alert.get('message', 'No message')}")
+                    
+                    # Show positive/info alerts in expander
+                    if info_alerts:
+                        with st.expander(f"ℹ️ Additional Risk Insights ({len(info_alerts)} items)", expanded=False):
+                            for alert in info_alerts:
+                                if alert.get('type') == 'success':
+                                    st.success(f"**{alert.get('category', 'Risk')}**: {alert.get('message', 'No message')}")
+                                else:
+                                    st.info(f"**{alert.get('category', 'Risk')}**: {alert.get('message', 'No message')}")
+                
+                # Quick risk metrics display
+                try:
+                    risk_metrics = risk_analyzer.calculate_comprehensive_risk_metrics(portfolio_df)
+                    
+                    st.markdown("#### 📊 Key Risk Metrics")
+                    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                    
+                    with metric_col1:
+                        volatility = risk_metrics['volatility']['annualized']
+                        vol_color = "🟢" if volatility < 0.15 else "🟡" if volatility < 0.25 else "🔴"
+                        st.metric("Portfolio Volatility", f"{volatility:.1%}", help="Annual volatility")
+                        st.markdown(f"{vol_color} Risk Level")
+                    
+                    with metric_col2:
+                        var_95 = risk_metrics['var']['var_95']
+                        var_color = "🟢" if var_95 < 0.02 else "🟡" if var_95 < 0.05 else "🔴"
+                        st.metric("VaR (95%)", f"{var_95:.2%}", help="Maximum 1-day loss (95% confidence)")
+                        st.markdown(f"{var_color} Risk Level")
+                    
+                    with metric_col3:
+                        sharpe = risk_metrics.get('performance', {}).get('sharpe_ratio', 0)
+                        sharpe_color = "🔴" if sharpe < 0.5 else "🟡" if sharpe < 1.0 else "🟢"
+                        st.metric("Sharpe Ratio", f"{sharpe:.2f}", help="Risk-adjusted return")
+                        st.markdown(f"{sharpe_color} Performance")
+                    
+                    with metric_col4:
+                        diversification_score = min(100, len(symbols) * 10)  # Simple diversification score
+                        div_color = "🔴" if diversification_score < 50 else "🟡" if diversification_score < 80 else "🟢"
+                        st.metric("Diversification", f"{diversification_score}%", help="Portfolio diversification score")
+                        st.markdown(f"{div_color} Level")
+                    
+                except Exception as risk_calc_error:
+                    st.info(f"Advanced risk calculation unavailable: {str(risk_calc_error)}")
+                
+                # Add link to full risk analysis
+                st.markdown("---")
+                st.info("💡 **Want deeper risk analysis?** Use the **What-If Analysis → Risk Analysis** tab for comprehensive portfolio risk assessment including correlation analysis, stress testing, and Monte Carlo simulations.")
+                
+            else:
+                st.info("No valid portfolio positions found for advanced risk analysis.")
+                
+        except Exception as e:
+            st.warning(f"Advanced risk analysis unavailable: {str(e)}")
+            st.info("💡 Basic portfolio monitoring continues to function normally.")
 
 def create_portfolio_performance_chart():
     """Create a performance chart for the portfolio"""
