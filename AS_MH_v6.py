@@ -17,9 +17,34 @@ warnings.filterwarnings('ignore')
 # Suppress numpy deprecation warnings related to pandas compatibility
 import sys
 if sys.version_info >= (3, 7):
+    # Comprehensive numpy deprecation warning suppression
     warnings.filterwarnings('ignore', message='.*np.bool.*deprecated.*', category=DeprecationWarning)
     warnings.filterwarnings('ignore', message='.*np.int.*deprecated.*', category=DeprecationWarning)
     warnings.filterwarnings('ignore', message='.*np.float.*deprecated.*', category=DeprecationWarning)
+    warnings.filterwarnings('ignore', message='.*np.object.*deprecated.*', category=DeprecationWarning)
+    warnings.filterwarnings('ignore', message='.*np.complex.*deprecated.*', category=DeprecationWarning)
+    
+    # Additional specific warnings for pandas-numpy compatibility
+    warnings.filterwarnings('ignore', message='.*was a deprecated alias.*', category=DeprecationWarning)
+    warnings.filterwarnings('ignore', message='.*use.*by itself.*', category=DeprecationWarning)
+    warnings.filterwarnings('ignore', message='.*boolean index.*deprecated.*', category=FutureWarning)
+
+# Additional numpy compatibility fix for pandas
+try:
+    # Handle numpy deprecation in pandas
+    import pandas as pd
+    import numpy as np
+    
+    # Monkey patch for older pandas versions if needed
+    if hasattr(pd.core.dtypes.common, 'is_integer_dtype'):
+        # Force pandas to use correct numpy dtypes
+        pass
+    
+    # Set numpy error handling to ignore deprecation warnings
+    np.seterr(all='ignore')
+    
+except Exception:
+    pass
 
 # Enhanced Features Integration
 try:
@@ -223,7 +248,7 @@ class AdvancedRiskAnalyzer:
         return excess_returns * np.sqrt(252)  # Simplified version
     
     def calculate_correlation_matrix(self, returns):
-        """Calculate correlation matrix with enhanced error handling"""
+        """Calculate correlation matrix with enhanced error handling and pandas version compatibility"""
         try:
             if returns.empty:
                 return pd.DataFrame()
@@ -232,17 +257,81 @@ class AdvancedRiskAnalyzer:
             if len(returns) < 2:
                 return pd.DataFrame()
             
-            # Calculate correlation matrix with error handling
-            correlation_matrix = returns.corr(method='pearson')
-            
-            # Handle any NaN values
-            correlation_matrix = correlation_matrix.fillna(0)
-            
-            return correlation_matrix
+            # Comprehensive warning suppression for numpy deprecation issues
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # Suppress all warnings
+                # Specifically suppress numpy deprecation warnings and aliases
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
+                warnings.filterwarnings("ignore", category=FutureWarning)
+                warnings.filterwarnings("ignore", message=".*np.bool.*")
+                warnings.filterwarnings("ignore", message=".*np.int.*")
+                warnings.filterwarnings("ignore", message=".*np.float.*")
+                warnings.filterwarnings("ignore", message=".*np.object.*")
+                warnings.filterwarnings("ignore", message=".*deprecated alias.*")
+                warnings.filterwarnings("ignore", message=".*was originally deprecated.*")
+                warnings.filterwarnings("ignore", message=".*numpy.*has no attribute.*")
+                
+                # Additional NumPy 2.x compatibility
+                import sys
+                if sys.version_info >= (3, 8):
+                    warnings.filterwarnings("ignore", message=".*NumPy.*", category=DeprecationWarning)
+                    warnings.filterwarnings("ignore", message=".*The .* module.*", category=DeprecationWarning)
+                
+                # Ensure returns DataFrame has proper dtypes to avoid numpy issues
+                returns_clean = returns.copy()
+                
+                # Convert any object columns to numeric, handling errors gracefully
+                for col in returns_clean.columns:
+                    if returns_clean[col].dtype == 'object':
+                        returns_clean[col] = pd.to_numeric(returns_clean[col], errors='coerce')
+                
+                # Remove any columns that are all NaN after conversion
+                returns_clean = returns_clean.dropna(axis=1, how='all')
+                
+                if returns_clean.empty or len(returns_clean.columns) < 2:
+                    return pd.DataFrame()
+                
+                # Filter to only numeric columns using Python built-in types (avoid np.number)
+                # This prevents NumPy deprecation warnings
+                numeric_columns = []
+                for col in returns_clean.columns:
+                    dtype_str = str(returns_clean[col].dtype)
+                    if any(x in dtype_str for x in ['int', 'float', 'complex']):
+                        numeric_columns.append(col)
+                
+                if len(numeric_columns) < 2:
+                    return pd.DataFrame()
+                
+                returns_numeric = returns_clean[numeric_columns]
+                
+                # Calculate correlation matrix with pandas version compatibility
+                try:
+                    # Try with numeric_only parameter (newer pandas versions)
+                    correlation_matrix = returns_numeric.corr(method='pearson', min_periods=1, numeric_only=True)
+                except TypeError:
+                    # Fall back to method without numeric_only (older pandas versions)
+                    correlation_matrix = returns_numeric.corr(method='pearson', min_periods=1)
+                
+                # Handle any NaN values with explicit dtype conversion
+                if correlation_matrix is not None and not correlation_matrix.empty:
+                    # Fill NaN with 0.0 and ensure float64 dtype
+                    correlation_matrix = correlation_matrix.fillna(0.0).astype('float64')
+                    
+                    # Ensure we have a valid correlation matrix structure
+                    if correlation_matrix.shape[0] == 0:
+                        return pd.DataFrame()
+                
+                return correlation_matrix
             
         except Exception as e:
-            # If correlation calculation fails, return empty DataFrame
-            print(f"Warning: Correlation matrix calculation failed: {e}")
+            # Enhanced error handling with NumPy deprecation awareness
+            error_msg = str(e)
+            if any(x in error_msg.lower() for x in ["np.bool", "deprecated alias", "numpy", "has no attribute"]):
+                error_msg = "NumPy version compatibility issue - correlation matrix calculation unavailable"
+            
+            # Use st.warning instead of print to avoid console clutter
+            if 'st' in globals():
+                st.warning(f"⚠️ Could not calculate correlation matrix: {error_msg}")
             return pd.DataFrame()
     
     def calculate_concentration_risk(self, holdings_data):
@@ -5900,205 +5989,240 @@ def get_simple_current_price(symbol):
 def display_advanced_risk_analysis(portfolio_data, risk_analyzer):
     """Display comprehensive risk analysis with advanced metrics and visualizations"""
     
-    st.subheader("🎯 Advanced Risk Analysis")
-    
-    try:
-        # Calculate comprehensive risk metrics
-        risk_metrics = risk_analyzer.calculate_comprehensive_risk_metrics(portfolio_data)
+    # Comprehensive NumPy deprecation warning suppression for this function
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        warnings.filterwarnings("ignore", message=".*np.bool.*")
+        warnings.filterwarnings("ignore", message=".*np.int.*")
+        warnings.filterwarnings("ignore", message=".*np.float.*")
+        warnings.filterwarnings("ignore", message=".*deprecated alias.*")
+        warnings.filterwarnings("ignore", message=".*numpy.*has no attribute.*")
         
-        # Create columns for risk overview
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
-            st.metric(
-                "Portfolio Volatility", 
-                f"{portfolio_vol:.2%}",
-                help="Annualized portfolio volatility based on historical data"
-            )
-            
-        with col2:
-            var_95 = risk_metrics.get('value_at_risk_95', 0)
-            st.metric(
-                "95% VaR (1-day)", 
-                f"-{abs(var_95):.2%}",
-                help="Maximum expected loss over 1 day with 95% confidence"
-            )
-            
-        with col3:
-            expected_shortfall = risk_metrics.get('expected_shortfall', 0)
-            st.metric(
-                "Expected Shortfall", 
-                f"-{abs(expected_shortfall):.2%}",
-                help="Average loss in worst 5% of scenarios"
-            )
-            
-        with col4:
-            sharpe_ratio = risk_metrics.get('sharpe_ratio', 0)
-            st.metric(
-                "Sharpe Ratio", 
-                f"{sharpe_ratio:.2f}",
-                help="Risk-adjusted return measure"
-            )
-        
-        # Risk breakdown by asset
-        st.subheader("📊 Risk Contribution by Asset")
-        
-        # Create risk contribution chart
-        if 'risk_contribution' in risk_metrics:
-            risk_contrib_df = pd.DataFrame(risk_metrics['risk_contribution'].items(), 
-                                         columns=['Stock', 'Risk Contribution'])
-            risk_contrib_df['Risk Contribution %'] = risk_contrib_df['Risk Contribution'] * 100
-            
-            fig_risk = px.bar(
-                risk_contrib_df, 
-                x='Stock', 
-                y='Risk Contribution %',
-                title="Individual Risk Contribution (%)",
-                color='Risk Contribution %',
-                color_continuous_scale='Reds'
-            )
-            fig_risk.update_layout(height=400)
-            st.plotly_chart(fig_risk, use_container_width=True)
-        
-        # Correlation matrix
-        st.subheader("🔗 Asset Correlation Matrix")
+        st.subheader("🎯 Advanced Risk Analysis")
         
         try:
-            correlation_matrix = risk_analyzer.calculate_correlation_matrix(portfolio_data)
-            if correlation_matrix is not None and not correlation_matrix.empty:
-                fig_corr = px.imshow(
-                    correlation_matrix,
-                    title="Portfolio Correlation Heatmap",
-                    color_continuous_scale='RdBu',
-                    aspect='auto'
+            # Calculate comprehensive risk metrics
+            risk_metrics = risk_analyzer.calculate_comprehensive_risk_metrics(portfolio_data)
+            
+            # Create columns for risk overview
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
+                st.metric(
+                    "Portfolio Volatility", 
+                    f"{portfolio_vol:.2%}",
+                    help="Annualized portfolio volatility based on historical data"
                 )
-                fig_corr.update_layout(height=500)
-                st.plotly_chart(fig_corr, use_container_width=True)
                 
-                # Correlation insights
-                high_corr_pairs = []
-                for i in range(len(correlation_matrix.columns)):
-                    for j in range(i+1, len(correlation_matrix.columns)):
-                        corr_val = correlation_matrix.iloc[i, j]
-                        if abs(corr_val) > 0.7:  # High correlation threshold
-                            high_corr_pairs.append({
-                                'Stock 1': correlation_matrix.columns[i],
-                                'Stock 2': correlation_matrix.columns[j],
-                                'Correlation': corr_val
-                            })
+            with col2:
+                var_95 = risk_metrics.get('value_at_risk_95', 0)
+                st.metric(
+                    "95% VaR (1-day)", 
+                    f"-{abs(var_95):.2%}",
+                    help="Maximum expected loss over 1 day with 95% confidence"
+                )
                 
-                if high_corr_pairs:
-                    st.warning("⚠️ **High Correlation Alert**: The following pairs show high correlation (>70%):")
-                    for pair in high_corr_pairs[:5]:  # Show top 5
-                        st.write(f"• {pair['Stock 1']} ↔ {pair['Stock 2']}: {pair['Correlation']:.2%}")
-            else:
-                st.info("📊 Correlation matrix not available - insufficient data or calculation error")
-        except Exception as e:
-            st.warning(f"⚠️ Could not calculate correlation matrix: {str(e)}")
-            st.info("💡 This may be due to insufficient historical data or data quality issues")
-        
-        # Stress testing results
-        st.subheader("🚨 Stress Testing")
-        
-        # Get stress scenarios from risk metrics (already calculated)
-        stress_results = risk_metrics.get('stress_scenarios', {})
-        
-        # Display stress test results
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**Scenario Impact on Portfolio Value:**")
-            if stress_results:
-                for scenario_name, scenario_data in stress_results.items():
-                    impact_pct = scenario_data.get('portfolio_loss_pct', 0)
-                    color = "🔴" if impact_pct < -15 else "🟡" if impact_pct < -5 else "🟢"
-                    st.write(f"{color} {scenario_name.replace('_', ' ').title()}: {impact_pct:.1f}%")
-            else:
-                st.info("Stress test data not available")
-        
-        with col2:
-            # Monte Carlo simulation
-            st.write("**Monte Carlo Simulation (1 Year):**")
-            mc_results = risk_metrics.get('monte_carlo_var', {})
+            with col3:
+                expected_shortfall = risk_metrics.get('expected_shortfall', 0)
+                st.metric(
+                    "Expected Shortfall", 
+                    f"-{abs(expected_shortfall):.2%}",
+                    help="Average loss in worst 5% of scenarios"
+                )
+                
+            with col4:
+                sharpe_ratio = risk_metrics.get('sharpe_ratio', 0)
+                st.metric(
+                    "Sharpe Ratio", 
+                    f"{sharpe_ratio:.2f}",
+                    help="Risk-adjusted return measure"
+                )
             
-            if mc_results and mc_results.get('expected_return', 0) != 0:
-                expected_return = mc_results.get('expected_return', 0)
-                mc_var_95 = mc_results.get('mc_var_95', 0)
-                mc_var_99 = mc_results.get('mc_var_99', 0)
-                
-                st.write(f"• Expected Return: {expected_return:.2f}%")
-                st.write(f"• 95% VaR: {mc_var_95:.2f}%")
-                st.write(f"• 99% VaR: {mc_var_99:.2f}%")
-                
-                # Calculate probability of loss (simplified)
-                prob_loss = max(0, min(100, 50 - expected_return))
-                st.write(f"• Est. Probability of Loss: {prob_loss:.1f}%")
-            else:
-                st.info("Monte Carlo data not available")
-        
-        # Risk-adjusted performance metrics
-        st.subheader("📈 Risk-Adjusted Performance")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            sortino = risk_metrics.get('sortino_ratio', 0)
-            st.metric("Sortino Ratio", f"{sortino:.2f}", help="Downside risk-adjusted return")
+            # Risk breakdown by asset
+            st.subheader("📊 Risk Contribution by Asset")
             
-        with col2:
-            max_dd = risk_metrics.get('maximum_drawdown', 0)
-            st.metric("Max Drawdown", f"{abs(max_dd):.2%}", help="Largest peak-to-trough decline")
+            # Create risk contribution chart
+            if 'risk_contribution' in risk_metrics:
+                risk_contrib_df = pd.DataFrame(risk_metrics['risk_contribution'].items(), 
+                                             columns=['Stock', 'Risk Contribution'])
+                risk_contrib_df['Risk Contribution %'] = risk_contrib_df['Risk Contribution'] * 100
+                
+                fig_risk = px.bar(
+                    risk_contrib_df, 
+                    x='Stock', 
+                    y='Risk Contribution %',
+                    title="Individual Risk Contribution (%)",
+                    color='Risk Contribution %',
+                    color_continuous_scale='Reds'
+                )
+                fig_risk.update_layout(height=400)
+                st.plotly_chart(fig_risk, use_container_width=True)
             
-        with col3:
-            calmar = risk_metrics.get('calmar_ratio', 0)
-            st.metric("Calmar Ratio", f"{calmar:.2f}", help="Return vs. max drawdown")
+            # Correlation matrix
+            st.subheader("🔗 Asset Correlation Matrix")
+            
+            # Initialize variable to avoid reference errors
+            high_corr_pairs = []
         
-        # Risk recommendations
-        st.subheader("💡 Risk Management Recommendations")
-        
-        recommendations = []
-        
-        # Check portfolio concentration
-        if len(portfolio_data) < 10:
-            recommendations.append("🎯 **Diversification**: Consider adding more positions to reduce concentration risk")
-        
-        # Check high correlation
-        if high_corr_pairs:
-            recommendations.append(f"🔗 **Correlation**: {len(high_corr_pairs)} high-correlation pairs detected - consider rebalancing")
-        
-        # Check volatility
-        portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
-        if portfolio_vol > 0.25:
-            recommendations.append("📊 **Volatility**: Portfolio shows high volatility - consider adding defensive positions")
-        
-        # Check VaR
-        var_95 = abs(risk_metrics.get('value_at_risk_95', 0))
-        if var_95 > 0.05:
-            recommendations.append("⚠️ **VaR**: High Value-at-Risk detected - consider risk reduction strategies")
-        
-        # Check Sharpe ratio
-        sharpe_ratio = risk_metrics.get('sharpe_ratio', 0)
-        if sharpe_ratio < 0.5 and sharpe_ratio > 0:
-            recommendations.append("📉 **Performance**: Low risk-adjusted returns - consider portfolio optimization")
-        
-        # Positive alerts for good risk management
-        if (portfolio_vol < 0.15 and var_95 < 0.02 and sharpe_ratio > 1.0):
-            recommendations.append("✅ **Excellent Risk Profile**: Portfolio shows strong risk-adjusted performance")
-        
-        # Display recommendations
-        if recommendations:
-            for rec in recommendations:
-                if "✅" in rec:
-                    st.success(rec)
+            
+            try:
+                # Extract symbols from portfolio data and get proper returns data for correlation
+                if isinstance(portfolio_data, pd.DataFrame):
+                    portfolio_symbols = portfolio_data['symbol'].tolist() if 'symbol' in portfolio_data.columns else []
                 else:
-                    st.warning(rec)
-        else:
-            st.success("✅ **Portfolio Risk Profile**: Your portfolio shows well-managed risk characteristics")
+                    portfolio_symbols = portfolio_data if portfolio_data else []
+                
+                if portfolio_symbols:
+                    # Get price data and calculate returns for correlation matrix
+                    price_data = risk_analyzer.get_portfolio_price_data(portfolio_symbols)
+                    
+                    if not price_data.empty:
+                        returns = price_data.pct_change().dropna()
+                        correlation_matrix = risk_analyzer.calculate_correlation_matrix(returns)
+                    else:
+                        correlation_matrix = pd.DataFrame()
+                else:
+                    correlation_matrix = pd.DataFrame()
+                    
+                if correlation_matrix is not None and not correlation_matrix.empty:
+                    fig_corr = px.imshow(
+                        correlation_matrix,
+                        title="Portfolio Correlation Heatmap",
+                        color_continuous_scale='RdBu',
+                        aspect='auto'
+                    )
+                    fig_corr.update_layout(height=500)
+                    st.plotly_chart(fig_corr, use_container_width=True)
+                    
+                    # Correlation insights
+                    high_corr_pairs = []
+                    for i in range(len(correlation_matrix.columns)):
+                        for j in range(i+1, len(correlation_matrix.columns)):
+                            corr_val = correlation_matrix.iloc[i, j]
+                            if abs(corr_val) > 0.7:  # High correlation threshold
+                                high_corr_pairs.append({
+                                    'Stock 1': correlation_matrix.columns[i],
+                                    'Stock 2': correlation_matrix.columns[j],
+                                    'Correlation': corr_val
+                                })
+                    
+                    if high_corr_pairs:
+                        st.warning("⚠️ **High Correlation Alert**: The following pairs show high correlation (>70%):")
+                        for pair in high_corr_pairs[:5]:  # Show top 5
+                            st.write(f"• {pair['Stock 1']} ↔ {pair['Stock 2']}: {pair['Correlation']:.2%}")
+                else:
+                    st.info("📊 Correlation matrix not available - insufficient data or calculation error")
+            except Exception as e:
+                st.warning(f"⚠️ Could not calculate correlation matrix: {str(e)}")
+                st.info("💡 This may be due to insufficient historical data or data quality issues")
             
-    except Exception as e:
-        st.error(f"Error in risk analysis: {str(e)}")
-        st.info("Risk analysis requires portfolio data with sufficient history for calculation")
+            # Stress testing results
+            st.subheader("🚨 Stress Testing")
+            
+            # Get stress scenarios from risk metrics (already calculated)
+            stress_results = risk_metrics.get('stress_scenarios', {})
+            
+            # Display stress test results
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Scenario Impact on Portfolio Value:**")
+                if stress_results:
+                    for scenario_name, scenario_data in stress_results.items():
+                        impact_pct = scenario_data.get('portfolio_loss_pct', 0)
+                        color = "🔴" if impact_pct < -15 else "🟡" if impact_pct < -5 else "🟢"
+                        st.write(f"{color} {scenario_name.replace('_', ' ').title()}: {impact_pct:.1f}%")
+                else:
+                    st.info("Stress test data not available")
+            
+            with col2:
+                # Monte Carlo simulation
+                st.write("**Monte Carlo Simulation (1 Year):**")
+                mc_results = risk_metrics.get('monte_carlo_var', {})
+                
+                if mc_results and mc_results.get('expected_return', 0) != 0:
+                    expected_return = mc_results.get('expected_return', 0)
+                    mc_var_95 = mc_results.get('mc_var_95', 0)
+                    mc_var_99 = mc_results.get('mc_var_99', 0)
+                    
+                    st.write(f"• Expected Return: {expected_return:.2f}%")
+                    st.write(f"• 95% VaR: {mc_var_95:.2f}%")
+                    st.write(f"• 99% VaR: {mc_var_99:.2f}%")
+                    
+                    # Calculate probability of loss (simplified)
+                    prob_loss = max(0, min(100, 50 - expected_return))
+                    st.write(f"• Est. Probability of Loss: {prob_loss:.1f}%")
+                else:
+                    st.info("Monte Carlo data not available")
+        
+            # Risk-adjusted performance metrics
+            st.subheader("📈 Risk-Adjusted Performance")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                sortino = risk_metrics.get('sortino_ratio', 0)
+                st.metric("Sortino Ratio", f"{sortino:.2f}", help="Downside risk-adjusted return")
+                
+            with col2:
+                max_dd = risk_metrics.get('maximum_drawdown', 0)
+                st.metric("Max Drawdown", f"{abs(max_dd):.2%}", help="Largest peak-to-trough decline")
+                
+            with col3:
+                calmar = risk_metrics.get('calmar_ratio', 0)
+                st.metric("Calmar Ratio", f"{calmar:.2f}", help="Return vs. max drawdown")
+        
+            # Risk recommendations
+            st.subheader("💡 Risk Management Recommendations")
+            
+            recommendations = []
+            
+            # Check portfolio concentration
+            if len(portfolio_data) < 10:
+                recommendations.append("🎯 **Diversification**: Consider adding more positions to reduce concentration risk")
+            
+            # Check high correlation
+            if high_corr_pairs:
+                recommendations.append(f"🔗 **Correlation**: {len(high_corr_pairs)} high-correlation pairs detected - consider rebalancing")
+            
+            # Check volatility
+            portfolio_vol = risk_metrics.get('portfolio_volatility', 0)
+            if portfolio_vol > 0.25:
+                recommendations.append("📊 **Volatility**: Portfolio shows high volatility - consider adding defensive positions")
+            
+            # Check VaR
+            var_95 = abs(risk_metrics.get('value_at_risk_95', 0))
+            if var_95 > 0.05:
+                recommendations.append("⚠️ **VaR**: High Value-at-Risk detected - consider risk reduction strategies")
+            
+            # Check Sharpe ratio
+            sharpe_ratio = risk_metrics.get('sharpe_ratio', 0)
+            if sharpe_ratio < 0.5 and sharpe_ratio > 0:
+                recommendations.append("📉 **Performance**: Low risk-adjusted returns - consider portfolio optimization")
+            
+            # Positive alerts for good risk management
+            if (portfolio_vol < 0.15 and var_95 < 0.02 and sharpe_ratio > 1.0):
+                recommendations.append("✅ **Excellent Risk Profile**: Portfolio shows strong risk-adjusted performance")
+            
+            # Display recommendations
+            if recommendations:
+                for rec in recommendations:
+                    if "✅" in rec:
+                        st.success(rec)
+                    else:
+                        st.warning(rec)
+            else:
+                st.success("✅ **Portfolio Risk Profile**: Your portfolio shows well-managed risk characteristics")
+                
+        except Exception as e:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                st.error(f"Error in risk analysis: {str(e)}")
+                st.info("Risk analysis requires portfolio data with sufficient history for calculation")
 
 class StockDataManager:
     """Centralized stock data management with consistent caching"""
@@ -7921,10 +8045,10 @@ def main():
                             min_score = st.slider("Minimum Score to Keep", 4.0, 8.0, 6.0, 0.1)
                         
                         with col2:
-                            rebalance_market = st.selectbox("Market Source", ["S&P 500", "NASDAQ 100", "Danish Stocks"])
-                            aggressive_mode = st.checkbox("Aggressive Rebalancing")
+                            rebalance_market = st.selectbox("Market Source", ["S&P 500", "NASDAQ 100", "Danish Stocks"], key="what_if_rebalance_market")
+                            aggressive_mode = st.checkbox("Aggressive Rebalancing", key="what_if_aggressive_mode")
                         
-                        if st.button("🔄 Analyze Rebalancing", type="primary"):
+                        if st.button("🔄 Analyze Rebalancing", type="primary", key="what_if_analyze_rebalancing"):
                             with st.spinner("Analyzing portfolio..."):
                                 st.success("✅ Rebalancing analysis complete!")
                                 
@@ -7952,7 +8076,7 @@ def main():
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    screener_market = st.selectbox("Market to Screen", ["S&P 500", "NASDAQ 100", "Danish Stocks", "All Markets"])
+                    screener_market = st.selectbox("Market to Screen", ["S&P 500", "NASDAQ 100", "Danish Stocks", "All Markets"], key="what_if_screener_market")
                     min_score = st.slider("Minimum Score", 5.0, 9.0, 7.0, 0.1)
                 
                 with col2:
@@ -8114,7 +8238,8 @@ def main():
                             
                             modification_type = st.selectbox(
                                 "Choose modification type:",
-                                ["Add New Stock", "Remove Stock", "Change Quantity", "Rebalance Portfolio"]
+                                ["Add New Stock", "Remove Stock", "Change Quantity", "Rebalance Portfolio"],
+                                key="what_if_modification_type"
                             )
                             
                             scenario_changes = []

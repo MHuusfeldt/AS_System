@@ -154,14 +154,17 @@ class WhatIfAnalyzer:
         )
     
     def _get_market_data(self, symbol: str) -> Dict:
-        """Get current market data for symbol with caching"""
+        """Get current market data for symbol with caching and Danish stock support"""
         if symbol not in self.market_data_cache:
             try:
-                ticker = yf.Ticker(symbol)
+                # Handle Danish stock symbols
+                yahoo_symbol = self._get_yahoo_symbol(symbol)
+                
+                ticker = yf.Ticker(yahoo_symbol)
                 info = ticker.info
                 
                 self.market_data_cache[symbol] = {
-                    'current_price': info.get('currentPrice', 0),
+                    'current_price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
                     'sector': info.get('sector', 'Unknown'),
                     'industry': info.get('industry', 'Unknown'),
                     'market_cap': info.get('marketCap', 0),
@@ -178,25 +181,218 @@ class WhatIfAnalyzer:
         
         return self.market_data_cache[symbol]
     
-    def _calculate_stock_score(self, symbol: str, market_data: Dict) -> float:
-        """Calculate basic stock score if not available"""
-        # Simplified scoring based on available data
-        score = 5.0  # Start with neutral
+    def _get_yahoo_symbol(self, symbol: str) -> str:
+        """Convert symbol to proper Yahoo Finance format, handling Danish stocks"""
+        # Danish stock mappings from main system
+        DANISH_STOCKS = {
+            # Large Cap - Major Danish companies
+            "NOVO-B": "NOVO-B.CO", "NOVO": "NOVO-B.CO",
+            "MAERSK-B": "MAERSK-B.CO", "MAERSK": "MAERSK-B.CO",
+            "ORSTED": "ORSTED.CO", "DSV": "DSV.CO",
+            "CARLB": "CARL-B.CO", "CARL-B": "CARL-B.CO",
+            "NZYM-B": "NZYM-B.CO", "NOVOZYMES": "NZYM-B.CO",
+            "TRYG": "TRYG.CO", "DEMANT": "DEMANT.CO",
+            "COLO-B": "COLO-B.CO", "COLOPLAST": "COLO-B.CO",
+            "GMAB": "GMAB.CO", "GENMAB": "GMAB.CO",
+            
+            # Mid Cap
+            "AMBU-B": "AMBU-B.CO", "BAVA": "BAVA.CO",
+            "CHR": "CHR.CO", "DANSKE": "DANSKE.CO",
+            "FLS": "FLS.CO", "GN": "GN.CO",
+            "ISS": "ISS.CO", "JYSK": "JYSK.CO",
+            "NETC": "NETC.CO", "PNDORA": "PNDORA.CO",
+            "PANDORA": "PNDORA.CO", "RBREW": "RBREW.CO",
+            "ROCK-B": "ROCK-B.CO", "SIM": "SIM.CO",
+            "SYDB": "SYDB.CO", "VWS": "VWS.CO",
+            "VESTAS": "VWS.CO",
+            
+            # Additional stocks
+            "NYKR": "NYKR.CO", "TOPDM": "TOPDM.CO",
+            "ALMB": "ALMB.CO"
+        }
         
+        # Check if it's a known Danish stock
+        if symbol.upper() in DANISH_STOCKS:
+            return DANISH_STOCKS[symbol.upper()]
+        
+        # If symbol doesn't end with .CO but looks Danish, try adding .CO
+        if not symbol.endswith('.CO') and self._might_be_danish_stock(symbol):
+            return f"{symbol.upper()}.CO"
+        
+        return symbol.upper()
+    
+    def _might_be_danish_stock(self, symbol: str) -> bool:
+        """Check if a symbol might be a Danish stock based on patterns"""
+        danish_patterns = [
+            'ORSTED', 'NOVO', 'MAERSK', 'CARLSBERG', 'TRYG', 'DEMANT',
+            'COLOPLAST', 'GENMAB', 'AMBU', 'BAVARIAN', 'DANSKE', 'FLS',
+            'GN', 'ISS', 'JYSK', 'NETCOMPANY', 'PANDORA', 'ROCKWOOL',
+            'SIMCORP', 'SYDBANK', 'VESTAS', 'NYKREDIT', 'TOPDANMARK'
+        ]
+        
+        symbol_upper = symbol.upper()
+        
+        # Check for exact matches or partial matches with common Danish company names
+        for pattern in danish_patterns:
+            if pattern in symbol_upper or symbol_upper in pattern:
+                return True
+        
+        # Check for common Danish suffixes or patterns
+        if any(suffix in symbol_upper for suffix in ['-B', '-A', 'BANK', 'NORD']):
+            return True
+            
+        return False
+    
+    def _calculate_stock_score(self, symbol: str, market_data: Dict) -> float:
+        """Calculate comprehensive stock score based on market data"""
         try:
-            pe_ratio = market_data.get('pe_ratio', 0)
-            if 0 < pe_ratio < 15:
+            # Get additional financial data for scoring
+            yahoo_symbol = self._get_yahoo_symbol(symbol)
+            ticker = yf.Ticker(yahoo_symbol)
+            info = ticker.info
+            
+            if not info or info.get('currentPrice', 0) == 0:
+                return 5.0  # Neutral score if no data
+            
+            # Use a simplified but comprehensive scoring approach
+            score = 5.0  # Start with neutral
+            
+            # P/E Ratio scoring
+            pe_ratio = info.get('trailingPE', 0)
+            if 0 < pe_ratio <= 12:
+                score += 2
+            elif 12 < pe_ratio <= 18:
                 score += 1
-            elif 15 <= pe_ratio < 25:
+            elif 18 < pe_ratio <= 25:
                 score += 0.5
-            elif pe_ratio > 30:
+            elif pe_ratio > 35:
+                score -= 1
+            
+            # Forward P/E (more predictive)
+            forward_pe = info.get('forwardPE', 0)
+            if 0 < forward_pe <= 10:
+                score += 1.5
+            elif 10 < forward_pe <= 15:
+                score += 1
+            elif 15 < forward_pe <= 20:
+                score += 0.5
+            elif forward_pe > 30:
                 score -= 0.5
             
-            dividend_yield = market_data.get('dividend_yield', 0)
-            if dividend_yield > 0.03:  # > 3%
+            # PEG Ratio
+            peg = info.get('pegRatio', 0)
+            if 0 < peg <= 0.5:
+                score += 2
+            elif 0.5 < peg <= 1.0:
                 score += 1
-            elif dividend_yield > 0.01:  # > 1%
+            elif 1.0 < peg <= 1.5:
                 score += 0.5
+            elif peg > 2.0:
+                score -= 1
+            
+            # Price-to-Book
+            pb = info.get('priceToBook', 0)
+            if 0 < pb <= 1.0:
+                score += 1.5
+            elif 1.0 < pb <= 2.0:
+                score += 1
+            elif 2.0 < pb <= 3.0:
+                score += 0.5
+            elif pb > 5.0:
+                score -= 1
+            
+            # ROE
+            roe = info.get('returnOnEquity', 0)
+            if roe and roe > 0:
+                roe_pct = roe * 100
+                if roe_pct > 20:
+                    score += 2
+                elif roe_pct > 15:
+                    score += 1.5
+                elif roe_pct > 10:
+                    score += 1
+                elif roe_pct > 5:
+                    score += 0.5
+            
+            # Debt-to-Equity
+            debt_to_equity = info.get('debtToEquity', 0)
+            if debt_to_equity == 0:
+                score += 1  # No debt is good
+            elif 0 < debt_to_equity <= 30:
+                score += 0.5
+            elif debt_to_equity > 100:
+                score -= 1
+            
+            # Dividend Yield
+            div_yield = info.get('dividendYield', 0)
+            if div_yield and div_yield > 0:
+                div_pct = div_yield * 100
+                if 2 <= div_pct <= 6:
+                    score += 1
+                elif 1 <= div_pct < 2:
+                    score += 0.5
+                elif div_pct > 8:
+                    score -= 0.5  # Too high might be risky
+            
+            # Profit Margins
+            profit_margin = info.get('profitMargins', 0)
+            if profit_margin and profit_margin > 0:
+                margin_pct = profit_margin * 100
+                if margin_pct > 20:
+                    score += 1.5
+                elif margin_pct > 10:
+                    score += 1
+                elif margin_pct > 5:
+                    score += 0.5
+            
+            # Revenue Growth
+            revenue_growth = info.get('revenueGrowth', 0)
+            if revenue_growth and revenue_growth > 0:
+                growth_pct = revenue_growth * 100
+                if growth_pct > 15:
+                    score += 1.5
+                elif growth_pct > 10:
+                    score += 1
+                elif growth_pct > 5:
+                    score += 0.5
+            elif revenue_growth and revenue_growth < -0.1:
+                score -= 1  # Negative growth
+            
+            # Earnings Growth
+            earnings_growth = info.get('earningsGrowth', 0)
+            if earnings_growth and earnings_growth > 0:
+                earnings_pct = earnings_growth * 100
+                if earnings_pct > 20:
+                    score += 1.5
+                elif earnings_pct > 10:
+                    score += 1
+                elif earnings_pct > 5:
+                    score += 0.5
+            elif earnings_growth and earnings_growth < -0.1:
+                score -= 1
+            
+            # Market Cap consideration (stability factor)
+            market_cap = info.get('marketCap', 0)
+            if market_cap > 50e9:  # > 50B (large cap)
+                score += 0.5
+            elif market_cap > 10e9:  # > 10B (mid cap)
+                score += 0.25
+            
+            # Beta (volatility)
+            beta = info.get('beta', 1.0)
+            if beta and 0.8 <= beta <= 1.2:
+                score += 0.25  # Moderate volatility
+            elif beta and beta > 2.0:
+                score -= 0.5  # High volatility
+            
+            # Ensure score stays within reasonable bounds
+            score = max(0, min(10, score))
+            
+            return round(score, 2)
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating score for {symbol}: {e}")
+            return 5.0  # Return neutral score on error
             
             # Market cap consideration
             market_cap = market_data.get('market_cap', 0)
