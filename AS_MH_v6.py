@@ -537,16 +537,41 @@ def get_3year_financial_history(symbol):
             except Exception:
                 pass
             
-            # Free Cash Flow
+            # Free Cash Flow - Enhanced extraction with multiple field name attempts
             try:
-                if 'Operating Cash Flow' in cashflow.index and 'Capital Expenditures' in cashflow.index:
-                    operating_cf = cashflow.loc['Operating Cash Flow'].head(3)
-                    capex = cashflow.loc['Capital Expenditures'].head(3)
-                    
+                fcf_data = None
+                operating_cf = None
+                capex = None
+                
+                # Try multiple field name variations for Operating Cash Flow
+                for ocf_field in ['Operating Cash Flow', 'Cash Flow From Operations', 'Cash From Operations']:
+                    if ocf_field in cashflow.index:
+                        operating_cf = cashflow.loc[ocf_field].head(3)
+                        break
+                
+                # Try multiple field name variations for Capital Expenditures
+                for capex_field in ['Capital Expenditures', 'Capital Expenditure', 'Capex', 'Cash Flow From Investing']:
+                    if capex_field in cashflow.index:
+                        capex = cashflow.loc[capex_field].head(3)
+                        break
+                
+                # Also try direct FCF field if available
+                for fcf_field in ['Free Cash Flow', 'FreeCashFlow']:
+                    if fcf_field in cashflow.index:
+                        fcf_data = cashflow.loc[fcf_field].head(3)
+                        break
+                
+                # Calculate FCF if we have operating CF and capex
+                if fcf_data is None and operating_cf is not None and capex is not None:
                     if not operating_cf.empty and not capex.empty:
                         fcf_data = operating_cf - abs(capex)
-                        metrics_3y['fcf_trend'] = fcf_data.tolist()
-            except Exception:
+                
+                # Store FCF data if we have it
+                if fcf_data is not None and not fcf_data.empty:
+                    metrics_3y['fcf_trend'] = fcf_data.tolist()
+                    
+            except Exception as e:
+                print(f"Debug: FCF extraction failed for {symbol}: {e}")
                 pass
             
             # ROE calculation
@@ -674,10 +699,11 @@ def get_3year_price_performance(symbol):
         return {}
 
 # Enhanced scoring functions
-def score_pe(pe, industry_pe):
+def score_pe(pe, industry_pe, allow_neutral=True):
     """Enhanced P/E scoring with industry comparison"""
     if pe <= 0:
-        return 0
+        # For missing P/E data, return neutral score instead of 0 to indicate "unknown but not necessarily bad"
+        return 5 if allow_neutral else 0
     
     # Relative to industry
     relative_pe = pe / industry_pe if industry_pe > 0 else 1
@@ -721,10 +747,11 @@ def score_forward_pe(forward_pe, industry_pe):
     else:
         return 1
 
-def score_peg(peg):
+def score_peg(peg, allow_neutral=True):
     """Enhanced PEG scoring"""
     if peg <= 0:
-        return 0
+        # For missing PEG data, return neutral score instead of 0
+        return 5 if allow_neutral else 0
     if peg < 0.5:
         return 10
     elif peg < 0.75:
@@ -967,10 +994,11 @@ def score_debt_equity(de):
     else:  # Over 200%
         return 2
 
-def score_dividend_yield(dy):
+def score_dividend_yield(dy, allow_neutral=True):
     """Dividend yield scoring"""
     if dy <= 0:
-        return 0
+        # For missing dividend data, return neutral score - company might not pay dividends
+        return 5 if allow_neutral else 0
     if dy > 5:
         return 10
     elif dy > 3:
@@ -1875,6 +1903,387 @@ def display_comprehensive_analysis(analyzer):
         else:
             st.info("📉 Insufficient data for charts (need at least 50 data points)")
 
+def safe_format_number(value, default='N/A', add_commas=True):
+    """Safely format numbers with comma separators"""
+    if value is None or value == 'N/A' or value == '' or value == 0:
+        return default
+    
+    try:
+        # Handle string representations of numbers
+        if isinstance(value, str):
+            # Remove any currency symbols, commas, or percentage signs
+            cleaned_value = value.replace('$', '').replace(',', '').replace('%', '').strip()
+            if not cleaned_value or cleaned_value == '-':
+                return default
+            value = cleaned_value
+        
+        num_value = float(value)
+        
+        # Check for very small values that might be effectively zero
+        if abs(num_value) < 1e-10:
+            return default
+            
+        if add_commas:
+            return f"{num_value:,.0f}"
+        else:
+            return f"{num_value:.2f}"
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+def display_integrated_analysis(combined_data, include_technical=True):
+    """Display integrated analysis combining Yahoo Finance and Alpha Vantage data"""
+    
+    symbol = combined_data['symbol']
+    recommendation = combined_data.get('recommendation')
+    
+    if not recommendation:
+        st.error("❌ Analysis incomplete - missing recommendation data")
+        return
+    
+    recommendation_text, color, overall_score = recommendation
+    
+    # Header with key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        company_name = "Unknown"
+        current_price = 0
+        
+        # Try to get company info from different sources
+        if combined_data.get('alpha_data') and combined_data['alpha_data'].get('overview'):
+            overview = combined_data['alpha_data']['overview']
+            company_name = overview.get('Name', 'Unknown')[:20]
+            # Try to get price from Alpha Vantage
+            try:
+                current_price = float(fetch_price(symbol) or 0)
+            except:
+                current_price = 0
+        
+        # Fallback to Yahoo Finance data
+        if current_price == 0 and combined_data.get('yahoo_data'):
+            # The yahoo_data is already the info object from fetch_yahoo_info
+            yahoo_info = combined_data['yahoo_data']
+            
+            if not company_name or company_name == "Unknown":
+                company_name = yahoo_info.get('shortName', yahoo_info.get('longName', 'Unknown'))[:20]
+            current_price = (yahoo_info.get('currentPrice', 0) or 
+                           yahoo_info.get('regularMarketPrice', 0) or 0)
+        
+        st.metric("Company", company_name)
+        st.metric("Current Price", f"${current_price:.2f}" if current_price > 0 else "N/A")
+    
+    with col2:
+        st.metric("Overall Score", f"{overall_score:.1f}/10")
+        st.metric("Recommendation", recommendation_text)
+    
+    with col3:
+        # Show data sources used
+        sources_used = []
+        if combined_data.get('yahoo_data'):
+            sources_used.append("Yahoo Finance")
+        if combined_data.get('alpha_data'):
+            sources_used.append("Alpha Vantage")
+        if combined_data.get('technical_data'):
+            sources_used.append("Technical Analysis")
+        
+        st.metric("Data Sources", len(sources_used))
+        st.write(", ".join(sources_used))
+    
+    with col4:
+        # Show score confidence based on data availability
+        confidence = "High" if len(sources_used) >= 2 else "Medium" if len(sources_used) == 1 else "Low"
+        st.metric("Confidence", confidence)
+        
+        # Color-coded recommendation
+        if color == "green":
+            st.success(f"🟢 {recommendation_text}")
+        elif color == "red":
+            st.error(f"🔴 {recommendation_text}")
+        else:
+            st.warning(f"🟡 {recommendation_text}")
+    
+    # Tabbed display of different data sources
+    tabs = []
+    if combined_data.get('scores'):
+        tabs.append("📊 Combined Scores")
+    if combined_data.get('alpha_data'):
+        tabs.append("🔍 Alpha Vantage Data")
+    if combined_data.get('yahoo_data'):
+        tabs.append("📈 Yahoo Finance Data")
+    if combined_data.get('technical_data') and include_technical:
+        tabs.append("⚡ Technical Analysis")
+    
+    if tabs:
+        tab_objects = st.tabs(tabs)
+        tab_index = 0
+        
+        # Combined Scores Tab
+        if combined_data.get('scores'):
+            with tab_objects[tab_index]:
+                st.subheader("📊 Combined Fundamental Scores")
+                
+                # Create score visualization
+                scores = combined_data['scores']
+                
+                score_df = pd.DataFrame([
+                    {"Metric": metric, "Score": score, "Weight": st.session_state.score_weights.get(metric, 0)}
+                    for metric, score in scores.items()
+                ])
+                
+                if not score_df.empty:
+                    # Score chart with special handling for zero values
+                    fig = go.Figure()
+                    
+                    # Create display values (use 0.1 for zero scores to make them visible)
+                    display_scores = [max(0.1, s) if s == 0 else s for s in score_df['Score']]
+                    
+                    # Create colors with special handling for zero and neutral scores
+                    colors = []
+                    for s in score_df['Score']:
+                        if s == 0:
+                            colors.append('lightgray')  # Gray for zero/missing data
+                        elif s == 5:
+                            colors.append('lightblue')  # Light blue for neutral/unknown data
+                        elif s >= 7:
+                            colors.append('green')
+                        elif s >= 5:
+                            colors.append('orange')
+                        else:
+                            colors.append('red')
+                    
+                    fig.add_trace(go.Bar(
+                        x=score_df['Metric'],
+                        y=display_scores,
+                        name='Score',
+                        marker_color=colors,
+                        text=[f'{s:.1f}' if s > 0 else 'No Data' for s in score_df['Score']],
+                        textposition='outside'
+                    ))
+                    fig.update_layout(
+                        title=f"Fundamental Scores for {symbol}",
+                        xaxis_title="Metrics",
+                        yaxis_title="Score (0-10)",
+                        template="plotly_white",
+                        height=500,
+                        xaxis={'tickangle': 45}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Enhanced score table with status indicators
+                    score_df['Status'] = score_df['Score'].apply(
+                        lambda x: '⚪ No Data' if x == 0 else 
+                                  '� Neutral' if x == 5 else 
+                                  '�🟢 Excellent' if x >= 7 else 
+                                  '🟡 Good' if x > 5 else 
+                                  '🔴 Poor'
+                    )
+                    
+                    # Reorder columns for better display
+                    display_df = score_df[['Metric', 'Score', 'Status', 'Weight']]
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    
+                    # Show summary of zero scores and neutral scores
+                    zero_scores = score_df[score_df['Score'] == 0]['Metric'].tolist()
+                    neutral_scores = score_df[score_df['Score'] == 5]['Metric'].tolist()
+                    if zero_scores:
+                        st.info(f"📋 Metrics with no data available: {', '.join(zero_scores)}")
+                    if neutral_scores:
+                        st.info(f"🔵 Metrics with limited data (neutral scoring): {', '.join(neutral_scores)}")
+                
+            tab_index += 1
+        
+        # Alpha Vantage Data Tab
+        if combined_data.get('alpha_data'):
+            with tab_objects[tab_index]:
+                st.subheader("🔍 Alpha Vantage Company Overview")
+                
+                overview = combined_data['alpha_data']['overview']
+                alpha_scores = combined_data['alpha_data'].get('scores', {})
+                
+                # Company overview metrics
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.write("**Company Details**")
+                    st.write(f"Sector: {overview.get('Sector', 'N/A')}")
+                    st.write(f"Industry: {overview.get('Industry', 'N/A')}")
+                    st.write(f"Market Cap: {overview.get('MarketCapitalization', 'N/A')}")
+                    st.write(f"Exchange: {overview.get('Exchange', 'N/A')}")
+                
+                with col2:
+                    st.write("**Valuation Metrics**")
+                    st.write(f"P/E Ratio: {overview.get('PERatio', 'N/A')}")
+                    st.write(f"Forward P/E: {overview.get('ForwardPE', 'N/A')}")
+                    st.write(f"P/B Ratio: {overview.get('PriceToBookRatio', 'N/A')}")
+                    st.write(f"EV/EBITDA: {overview.get('EVToEBITDA', 'N/A')}")
+                
+                with col3:
+                    st.write("**Financial Health**")
+                    st.write(f"ROE: {overview.get('ReturnOnEquityTTM', 'N/A')}")
+                    st.write(f"Revenue (TTM): {overview.get('RevenueTTM', 'N/A')}")
+                    st.write(f"Gross Margin: {overview.get('GrossProfitTTM', 'N/A')}")
+                    st.write(f"Dividend Yield: {overview.get('DividendYield', 'N/A')}")
+                
+                # Alpha Vantage specific scores
+                if alpha_scores:
+                    st.subheader("Alpha Vantage Scores")
+                    alpha_df = pd.DataFrame([
+                        {"Metric": metric, "Score": score}
+                        for metric, score in alpha_scores.items()
+                    ])
+                    st.dataframe(alpha_df, use_container_width=True, hide_index=True)
+                
+            tab_index += 1
+        
+        # Yahoo Finance Data Tab
+        if combined_data.get('yahoo_data'):
+            with tab_objects[tab_index]:
+                st.subheader("📈 Yahoo Finance Data")
+                
+                # The yahoo_data is already the info object from fetch_yahoo_info
+                yahoo_info = combined_data['yahoo_data']
+                yahoo_scores = combined_data.get('scores', {})  # Get scores from combined_data
+                
+                # Yahoo Finance metrics
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.write("**Market Data**")
+                    
+                    # Format price values properly
+                    high_52w = yahoo_info.get('fiftyTwoWeekHigh')
+                    low_52w = yahoo_info.get('fiftyTwoWeekLow')
+                    volume = yahoo_info.get('volume')
+                    avg_volume = yahoo_info.get('averageVolume')
+                    
+                    st.write(f"52W High: ${high_52w:.2f}" if high_52w and high_52w > 0 else "52W High: N/A")
+                    st.write(f"52W Low: ${low_52w:.2f}" if low_52w and low_52w > 0 else "52W Low: N/A")
+                    st.write(f"Volume: {safe_format_number(volume)}")
+                    st.write(f"Avg Volume: {safe_format_number(avg_volume)}")
+                
+                with col2:
+                    st.write("**Profitability**")
+                    
+                    # Format percentage values properly  
+                    profit_margins = yahoo_info.get('profitMargins')
+                    operating_margins = yahoo_info.get('operatingMargins')
+                    revenue_growth = yahoo_info.get('revenueGrowth')
+                    earnings_growth = yahoo_info.get('earningsGrowth')
+                    
+                    # Convert decimal values to percentages if they exist
+                    profit_pct = f"{profit_margins*100:.1f}%" if profit_margins and profit_margins != 0 else "N/A"
+                    operating_pct = f"{operating_margins*100:.1f}%" if operating_margins and operating_margins != 0 else "N/A"
+                    revenue_pct = f"{revenue_growth*100:.1f}%" if revenue_growth and revenue_growth != 0 else "N/A"
+                    earnings_pct = f"{earnings_growth*100:.1f}%" if earnings_growth and earnings_growth != 0 else "N/A"
+                    
+                    st.write(f"Profit Margin: {profit_pct}")
+                    st.write(f"Operating Margin: {operating_pct}")
+                    st.write(f"Revenue Growth: {revenue_pct}")
+                    st.write(f"Earnings Growth: {earnings_pct}")
+                
+                with col3:
+                    st.write("**Analyst Data**")
+                    
+                    target_price = yahoo_info.get('targetMeanPrice')
+                    recommendation_mean = yahoo_info.get('recommendationMean')
+                    num_analysts = yahoo_info.get('numberOfAnalystOpinions')
+                    
+                    st.write(f"Target Price: ${target_price:.2f}" if target_price and target_price > 0 else "Target Price: N/A")
+                    st.write(f"Recommendation: {recommendation_mean:.1f}" if recommendation_mean and recommendation_mean > 0 else "Recommendation: N/A")
+                    st.write(f"Number of Analysts: {safe_format_number(num_analysts)}")
+                
+                # Yahoo Finance specific scores
+                if yahoo_scores:
+                    st.subheader("Yahoo Finance Scores")
+                    yahoo_df = pd.DataFrame([
+                        {"Metric": metric, "Score": score}
+                        for metric, score in yahoo_scores.items()
+                    ])
+                    st.dataframe(yahoo_df, use_container_width=True, hide_index=True)
+                
+            tab_index += 1
+        
+        # Technical Analysis Tab
+        if combined_data.get('technical_data') and include_technical:
+            with tab_objects[tab_index]:
+                st.subheader("⚡ Technical Analysis")
+                
+                technical_data = combined_data['technical_data']
+                analyzer = technical_data.get('analyzer')
+                signals = technical_data.get('signals', {})
+                
+                if analyzer and hasattr(analyzer, 'data') and analyzer.data is not None:
+                    # Technical indicators summary
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Technical Signals**")
+                        for signal_name, signal_data in signals.items():
+                            if isinstance(signal_data, dict):
+                                signal_value = signal_data.get('signal', 'N/A')
+                                confidence = signal_data.get('confidence', 'N/A')
+                                st.write(f"{signal_name}: {signal_value} ({confidence})")
+                    
+                    with col2:
+                        # Latest technical indicators
+                        if hasattr(analyzer, 'data') and analyzer.data is not None and len(analyzer.data) > 0:
+                            st.write("**Current Indicators**")
+                            latest = analyzer.data.iloc[-1]
+                            
+                            # Display available technical indicators
+                            indicator_cols = ['RSI', 'MACD', 'MACD_Signal', '%K', '%D', 'Volume_Ratio']
+                            for indicator in indicator_cols:
+                                if indicator in analyzer.data.columns:
+                                    value = latest[indicator]
+                                    if pd.notna(value):
+                                        st.write(f"{indicator}: {value:.2f}")
+                    
+                    # Price and volume chart
+                    if len(analyzer.data) > 0:
+                        st.subheader("📈 Price and Technical Indicators")
+                        
+                        fig = go.Figure()
+                        
+                        # Price data
+                        fig.add_trace(go.Scatter(
+                            x=analyzer.data.index,
+                            y=analyzer.data['Close'],
+                            mode='lines',
+                            name='Close Price',
+                            line=dict(color='blue', width=2)
+                        ))
+                        
+                        # Add moving averages if available
+                        if 'SMA_20' in analyzer.data.columns:
+                            fig.add_trace(go.Scatter(
+                                x=analyzer.data.index,
+                                y=analyzer.data['SMA_20'],
+                                mode='lines',
+                                name='SMA 20',
+                                line=dict(color='orange', width=1)
+                            ))
+                        
+                        if 'SMA_50' in analyzer.data.columns:
+                            fig.add_trace(go.Scatter(
+                                x=analyzer.data.index,
+                                y=analyzer.data['SMA_50'],
+                                mode='lines',
+                                name='SMA 50',
+                                line=dict(color='red', width=1)
+                            ))
+                        
+                        fig.update_layout(
+                            title=f"{symbol} - Technical Analysis",
+                            xaxis_title="Date",
+                            yaxis_title="Price ($)",
+                            template="plotly_white",
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("📊 Technical analysis data not available")
+
 def create_comprehensive_chart(analyzer):
     """Create a comprehensive chart combining price, volume, and indicators"""
     fig = make_subplots(
@@ -2057,15 +2466,15 @@ def calculate_scores_yahoo(info, industry_pe=20):
             has_fcf_data = True
         
         scores = {
-            "PE": score_pe(pe, industry_pe),
-            "PEG": score_peg(peg),
+            "PE": score_pe(pe, industry_pe, allow_neutral=True),
+            "PEG": score_peg(peg, allow_neutral=True),
             "PB": score_pb(pb),
             "ROE": score_roe_dynamic(roe, info.get("sector", "Unknown")),  # Enhanced with dynamic benchmarking
             "EPS Growth": score_eps_growth(eps_growth),
             "Revenue Growth": score_revenue_growth_dynamic(rev_growth, info.get("sector", "Unknown")),  # Enhanced
-            "FCF Trend": score_fcf_trend(fcf_trend, has_fcf_data),
+            "FCF Trend": score_fcf_trend(fcf_trend, has_fcf_data),  # Always include FCF Trend
             "Debt/Equity": score_debt_equity_dynamic(de, info.get("sector", "Unknown")),  # Enhanced
-            "Dividend Yield": score_dividend_yield(dy),
+            "Dividend Yield": score_dividend_yield(dy, allow_neutral=True),
             "Gross Margin": score_gross_margin_dynamic(gm, info.get("sector", "Unknown"))  # Enhanced
         }
         
@@ -2854,24 +3263,28 @@ def display_company_search():
     """Display company search interface"""
     st.subheader("🔍 Company Name Search")
     
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        search_query = st.text_input(
-            "Search for companies by name",
-            placeholder="e.g., Apple, Microsoft, Tesla",
-            help="Enter a company name to find its stock symbol",
-            key="company_search_query"
-        )
-    
-    with col2:
-        search_method = st.selectbox(
-            "Search Method",
-            ["Alpha Vantage", "Manual Lookup"],
+    with st.form("company_search_form"):
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            search_query = st.text_input(
+                "Search for companies by name",
+                placeholder="e.g., Apple, Microsoft, Tesla",
+                help="Enter a company name to find its stock symbol",
+                key="company_search_query"
+            )
+        
+        with col2:
+            search_method = st.selectbox(
+                "Search Method",
+                ["Alpha Vantage", "Manual Lookup"],
             help="Alpha Vantage provides comprehensive search"
         )
+        
+        # Add form submit button
+        search_submitted = st.form_submit_button("🔍 Search Companies", type="primary")
     
-    if search_query and len(search_query.strip()) >= 2:
+    if search_submitted and search_query and len(search_query.strip()) >= 2:
         with st.spinner("Searching for companies..."):
             if search_method == "Alpha Vantage":
                 results = search_company_by_name(search_query.strip())
@@ -3465,17 +3878,39 @@ def fetch_yahoo_info(symbol):
             financial_history = get_3year_financial_history(sym)
             price_performance = get_3year_price_performance(sym)
             
+            # Debug: For Danish stocks, print available fields to help improve data extraction
+            if '.CO' in sym or sym in DANISH_STOCKS.values():
+                print(f"\n--- Debug info for {sym} ---")
+                relevant_fields = [k for k in info.keys() if any(term in k.lower() for term in 
+                    ['pe', 'peg', 'dividend', 'yield', 'trailing', 'forward', 'earnings', 'growth'])]
+                print(f"Relevant fields found: {relevant_fields}")
+                for field in ['trailingPE', 'forwardPE', 'trailingPegRatio', 'pegRatio', 'dividendYield', 
+                             'trailingAnnualDividendYield', 'fiveYearAvgDividendYield']:
+                    if field in info:
+                        print(f"{field}: {info[field]}")
+                print("--- End debug ---\n")
+            
             enhanced_info = {
                 "name": info.get("longName", info.get("shortName", "Unknown")),
                 "price": info.get("currentPrice", info.get("regularMarketPrice")),
-                "pe": info.get("trailingPE"),
-                "peg": info.get("trailingPegRatio"),  # Fixed: use correct Yahoo Finance key
+                # Enhanced PE extraction with multiple fallbacks
+                "pe": (info.get("trailingPE") or 
+                       info.get("forwardPE") or 
+                       info.get("priceEarningsRatio") or 
+                       info.get("trailingPE")),
+                # Enhanced PEG extraction with multiple fallbacks
+                "peg": (info.get("trailingPegRatio") or 
+                        info.get("pegRatio") or
+                        info.get("forwardPegRatio")),
                 "pb": info.get("priceToBook"),
                 "roe": info.get("returnOnEquity"),
                 "eps_growth": info.get("earningsGrowth") or info.get("earningsQuarterlyGrowth"),  # Use yearly first, then quarterly
                 "revenue_growth": info.get("revenueGrowth"),  # Use consistent key name
                 "de": info.get("debtToEquity"),
-                "dy": info.get("dividendYield"),
+                # Enhanced dividend yield extraction
+                "dy": (info.get("dividendYield") or 
+                       info.get("trailingAnnualDividendYield") or
+                       info.get("fiveYearAvgDividendYield")),
                 "gm": info.get("grossMargins"),
                 "sector": info.get("sector", "Unknown"),
                 "industry": info.get("industry", "Unknown"),
@@ -3492,7 +3927,21 @@ def fetch_yahoo_info(symbol):
                 "enterpriseToEbitda": info.get("enterpriseToEbitda"),
                 "priceToSalesTrailing12Months": info.get("priceToSalesTrailing12Months"),
                 "targetMeanPrice": info.get("targetMeanPrice"),
-                "currentPrice": info.get("currentPrice", info.get("regularMarketPrice"))
+                "currentPrice": info.get("currentPrice", info.get("regularMarketPrice")),
+                # Add missing fields for display
+                "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh"),
+                "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow"),
+                "volume": info.get("volume"),
+                "averageVolume": info.get("averageVolume"),
+                "profitMargins": info.get("profitMargins"),
+                "operatingMargins": info.get("operatingMargins"),
+                "revenueGrowth": info.get("revenueGrowth"),
+                "earningsGrowth": info.get("earningsGrowth"),
+                "recommendationMean": info.get("recommendationMean"),
+                "numberOfAnalystOpinions": info.get("numberOfAnalystOpinions"),
+                "regularMarketPrice": info.get("regularMarketPrice"),
+                "shortName": info.get("shortName"),
+                "longName": info.get("longName")
             }
             
             return enhanced_info
@@ -3601,17 +4050,20 @@ def calculate_scores(symbol, industry_pe=20):
         except Exception:
             fcf = [0, 0, 0]
 
+    # Get sector information for dynamic scoring
+    sector = overview.get("Sector", "Unknown")
+    
     scores = {
-        "PE": score_pe(pe, industry_pe),
-        "PEG": score_peg(peg),
+        "PE": score_pe(pe, industry_pe, allow_neutral=True),
+        "PEG": score_peg(peg, allow_neutral=True),
         "PB": score_pb(pb),
-        "ROE": score_roe(roe),
+        "ROE": score_roe_dynamic(roe, sector),  # Use dynamic scoring
         "EPS Growth": score_eps_growth(eps_growth),
-        "Revenue Growth": score_revenue_growth(rev_growth),
+        "Revenue Growth": score_revenue_growth_dynamic(rev_growth, sector),  # Use dynamic scoring
         "FCF Trend": score_fcf_trend(fcf),
-        "Debt/Equity": score_debt_equity(de),
-        "Dividend Yield": score_dividend_yield(dy),
-        "Gross Margin": score_gross_margin(gm)
+        "Debt/Equity": score_debt_equity_dynamic(de, sector),  # Use dynamic scoring
+        "Dividend Yield": score_dividend_yield(dy, allow_neutral=True),
+        "Gross Margin": score_gross_margin_dynamic(gm, sector)  # Use dynamic scoring
     }
 
     return scores, overview
@@ -3632,14 +4084,32 @@ def get_recommendation(total_score):
 # --- Industry P/E Map ---
 # --- Visualization Functions ---
 def create_score_chart(scores):
-    """Create an interactive score chart using Plotly"""
+    """Create an interactive score chart using Plotly - Enhanced version"""
     metrics = list(scores.keys())
     values = list(scores.values())
     
+    # Enhanced color scheme consistent with the main scoring system
+    colors = []
+    for v in values:
+        if v == 0:
+            colors.append('lightgray')  # Gray for zero/missing data
+        elif v == 5:
+            colors.append('lightblue')  # Light blue for neutral/unknown data
+        elif v >= 7:
+            colors.append('green')
+        elif v >= 5:
+            colors.append('orange')
+        else:
+            colors.append('red')
+    
+    # Create display values (use 0.1 for zero scores to make them visible)
+    display_values = [max(0.1, v) if v == 0 else v for v in values]
+    
     fig = go.Figure(data=[
-        go.Bar(x=metrics, y=values, 
-               marker_color=['green' if v >= 5 else 'orange' if v >= 3 else 'red' for v in values],
-               text=values, textposition='auto')
+        go.Bar(x=metrics, y=display_values, 
+               marker_color=colors,
+               text=[f'{v:.1f}' if v > 0 else 'No Data' for v in values],
+               textposition='auto')
     ])
     
     fig.update_layout(
@@ -3647,7 +4117,8 @@ def create_score_chart(scores):
         xaxis_title="Metrics",
         yaxis_title="Score",
         yaxis=dict(range=[0, 10]),
-        height=400
+        height=400,
+        template="plotly_white"
     )
     
     return fig
@@ -5085,17 +5556,44 @@ def display_score_tracking():
 
 # --- Centralized Data Management ---
 
+def get_simple_current_price(symbol):
+    """Get current price for a symbol with Danish stock mapping support"""
+    try:
+        # First check if it's a Danish stock that needs mapping
+        mapped_symbol = symbol
+        if symbol in DANISH_STOCKS:
+            mapped_symbol = DANISH_STOCKS[symbol]
+        
+        # Try to fetch price using yfinance
+        ticker = yf.Ticker(mapped_symbol)
+        info = ticker.info
+        
+        # Try multiple price fields
+        price = (info.get('currentPrice') or 
+                info.get('regularMarketPrice') or 
+                info.get('previousClose'))
+        
+        return float(price) if price else 0.0
+    except Exception as e:
+        print(f"Error fetching price for {symbol}: {e}")
+        return 0.0
+
 class StockDataManager:
     """Centralized stock data management with consistent caching"""
     
     @staticmethod
-    @st.cache_data(ttl=1800)  # 30 minutes
+    # @st.cache_data(ttl=1800)  # Temporarily disabled to fix unhashable dict error
     def get_stock_data(symbol):
         """Single source of truth for all stock data"""
-        return fetch_yahoo_info(symbol)
+        try:
+            result = fetch_yahoo_info(symbol)
+            return result
+        except Exception as e:
+            st.warning(f"Error fetching data for {symbol}: {str(e)}")
+            return None
     
     @staticmethod
-    @st.cache_data(ttl=3600)  # 1 hour
+    # @st.cache_data(ttl=3600)  # Temporarily disabled to fix unhashable dict error
     def get_technical_data(symbol, period="1y"):
         """Centralized technical data fetching"""
         try:
@@ -5107,7 +5605,7 @@ class StockDataManager:
             return None
     
     @staticmethod
-    @st.cache_data(ttl=1800)  # 30 minutes
+    # @st.cache_data(ttl=1800)  # Temporarily disabled to fix unhashable dict error
     def get_industry_pe(symbol):
         """Get industry PE for a symbol"""
         info = StockDataManager.get_stock_data(symbol)
@@ -5833,218 +6331,233 @@ def main():
         st.markdown("Comprehensive stock analysis using multiple data sources and methodologies")
         
         # Create sub-tabs for different analysis methods
-        analysis_tab1, analysis_tab2, analysis_tab3 = st.tabs([
-            "🥇 Yahoo Finance Analysis", 
-            "📊 Alpha Vantage Analysis", 
+        analysis_tab1, analysis_tab2 = st.tabs([
+            "🚀 Comprehensive Analysis (Yahoo + Alpha Vantage)", 
             "🔍 Company Search"
         ])
         
         with analysis_tab1:
             st.subheader("🚀 Comprehensive Stock Analysis")
-            st.info("💡 Complete analysis combining fundamental scoring with technical signals and buying strategies")
+            st.info("💡 Advanced analysis combining Yahoo Finance and Alpha Vantage data sources with technical signals")
             
             if st.session_state.selected_symbols:
                 st.info(f"💡 You have {len(st.session_state.selected_symbols)} symbols selected from Company Search. Copy them from the search tab!")
             
-            symbols = st.text_input(
-                "Enter stock symbols (comma-separated)", 
-                "AAPL,MSFT,GOOGL", 
-                key="comprehensive",
-                help="Example: AAPL,MSFT,GOOGL"
-            )
+            # Data source selection
+            col1, col2, col3 = st.columns([2, 2, 1])
+            with col1:
+                data_sources = st.multiselect(
+                    "Select Data Sources",
+                    ["Yahoo Finance", "Alpha Vantage"],
+                    default=["Yahoo Finance"],
+                    help="Choose which data sources to use for analysis"
+                )
             
-            if st.button("🚀 Analyze Stocks", type="primary", key="yahoo_analyze"):
+            with col2:
+                analysis_depth = st.selectbox(
+                    "Analysis Depth",
+                    ["Basic", "Standard", "Comprehensive"],
+                    index=2,
+                    help="Basic: Key metrics only, Standard: + Technical analysis, Comprehensive: + Alpha Vantage data"
+                )
+            
+            with col3:
+                max_symbols = st.number_input(
+                    "Max Symbols",
+                    min_value=1,
+                    max_value=20,
+                    value=10,
+                    help="Limit symbols to avoid rate limits"
+                )
+            
+            # Enhanced analysis form
+            with st.form("comprehensive_analysis_form"):
+                symbols = st.text_input(
+                    "Enter stock symbols (comma-separated)", 
+                    "AAPL,MSFT,GOOGL", 
+                    key="comprehensive",
+                    help="Example: AAPL,MSFT,GOOGL"
+                )
+                
+                # Advanced options
+                with st.expander("⚙️ Advanced Options"):
+                    include_technical = st.checkbox("Include Technical Analysis", value=True)
+                    include_fundamentals = st.checkbox("Include Fundamental Scoring", value=True)
+                    use_alpha_vantage = st.checkbox("Use Alpha Vantage Data (slower but more detailed)", 
+                                                  value="Alpha Vantage" in data_sources)
+                    
+                    if use_alpha_vantage:
+                        st.warning("⚠️ Alpha Vantage has rate limits. Analysis will be slower but more comprehensive.")
+                
+                submitted = st.form_submit_button("🚀 Analyze Stocks", type="primary")
+            
+            if submitted:
                 symbol_list = validate_symbols(symbols)
                 
                 if not symbol_list:
                     st.error("Please enter valid stock symbols")
                 else:
-                    # Use enhanced async loading if available
-                    if st.session_state.get('enhanced_features_enabled', False):
-                        st.info(f"🚀 Using enhanced async loading for {len(symbol_list)} stocks...")
-                        
-                        # Create progress placeholder
-                        progress_placeholder = st.empty()
-                        
-                        # Initialize async loader
-                        async_loader = st.session_state.enhanced_features_manager.async_loader
-                        
-                        # Set progress callback
-                        def progress_callback(completed, total, message):
-                            progress = completed / total if total > 0 else 0
-                            progress_placeholder.progress(progress, text=f"Progress: {completed}/{total} - {message}")
-                        
-                        async_loader.set_progress_callback(progress_callback)
-                        
-                        # Fetch data asynchronously
-                        async_results = async_loader.fetch_multiple_stocks_threaded(symbol_list)
-                        
-                        # Clear progress
-                        progress_placeholder.empty()
-                        
-                        # Convert async results to analysis format
-                        analysis_results = {}
-                        for symbol, result in async_results.items():
-                            if result.success:
-                                analysis_results[symbol] = {
-                                    'info': result.data,
-                                    'scores': calculate_scores_yahoo(result.data) if result.data else {}
-                                }
-                        
-                        st.success(f"✅ Enhanced async loading completed! Processed {len(analysis_results)} stocks successfully")
-                        
-                    else:
-                        # Use standard analysis
-                        st.info(f"Analyzing {len(symbol_list)} stocks using standard data fetching...")
-                        analysis_results = analyze_multiple_stocks(symbol_list)
+                    # Limit symbols based on user input and data sources
+                    if len(symbol_list) > max_symbols:
+                        st.warning(f"⚠️ Limited to {max_symbols} symbols")
+                        symbol_list = symbol_list[:max_symbols]
                     
-                    successful_analyses = []
-                    for symbol, data in analysis_results.items():
-                        if data and 'scores' in data and 'info' in data:
-                            try:
-                                with st.container():
-                                    st.subheader(f"📈 {symbol.upper()} Analysis")
+                    # Further limit if using Alpha Vantage
+                    if use_alpha_vantage and len(symbol_list) > 5:
+                        st.warning("⚠️ Limited to 5 symbols when using Alpha Vantage to avoid rate limits")
+                        symbol_list = symbol_list[:5]
+                    
+                    st.info(f"🔍 Analyzing {len(symbol_list)} stocks using {', '.join(data_sources)} data...")
+                    
+                    analysis_results = {}
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    for i, symbol in enumerate(symbol_list):
+                        progress_bar.progress((i + 1) / len(symbol_list))
+                        status_text.text(f"Analyzing {symbol}... ({i+1}/{len(symbol_list)})")
+                        
+                        with st.container():
+                            st.subheader(f"📈 {symbol.upper()} Analysis")
+                            
+                            # Initialize combined data structure
+                            combined_data = {
+                                'symbol': symbol,
+                                'yahoo_data': None,
+                                'alpha_data': None,
+                                'technical_data': None,
+                                'scores': {},
+                                'recommendation': None
+                            }
+                            
+                            # Fetch Yahoo Finance data if selected
+                            if "Yahoo Finance" in data_sources:
+                                with st.spinner(f"📊 Fetching Yahoo Finance data for {symbol}..."):
+                                    try:
+                                        yahoo_analysis = analyze_multiple_stocks([symbol])
+                                        if yahoo_analysis and symbol in yahoo_analysis and yahoo_analysis[symbol]:
+                                            yahoo_result = yahoo_analysis[symbol]
+                                            # Store the info object directly for display
+                                            combined_data['yahoo_data'] = yahoo_result.get('info', {})
+                                            # Store scores separately
+                                            combined_data['scores'].update(yahoo_result.get('scores', {}))
+                                    except Exception as e:
+                                        st.warning(f"⚠️ Yahoo Finance data unavailable for {symbol}: {str(e)}")
+                            
+                            # Fetch Alpha Vantage data if selected and enabled
+                            if use_alpha_vantage and "Alpha Vantage" in data_sources:
+                                with st.spinner(f"🔍 Fetching Alpha Vantage data for {symbol}..."):
+                                    try:
+                                        overview = fetch_overview(symbol)
+                                        if overview:
+                                            industry = overview.get("Industry", None)
+                                            sector = overview.get("Sector", None)
+                                            industry_pe = INDUSTRY_PE_MAP.get(industry, INDUSTRY_PE_MAP.get(sector, INDUSTRY_PE_MAP["Unknown"]))
+                                            
+                                            alpha_scores, _ = calculate_scores(symbol, industry_pe)
+                                            if alpha_scores:
+                                                combined_data['alpha_data'] = {
+                                                    'overview': overview,
+                                                    'scores': alpha_scores,
+                                                    'industry_pe': industry_pe
+                                                }
+                                                # Merge Alpha Vantage scores with existing scores
+                                                for metric, score in alpha_scores.items():
+                                                    if metric in combined_data['scores']:
+                                                        # Average Yahoo and Alpha Vantage scores
+                                                        combined_data['scores'][metric] = (combined_data['scores'][metric] + score) / 2
+                                                    else:
+                                                        combined_data['scores'][metric] = score
+                                    except Exception as e:
+                                        st.warning(f"⚠️ Alpha Vantage data unavailable for {symbol}: {str(e)}")
                                     
-                                    # Use the comprehensive data we already have
-                                    info = data['info']
-                                    scores = data['scores']
-                                    
-                                    # Calculate overall score
-                                    available_weights = {k: st.session_state.score_weights.get(k, 0) 
-                                                       for k in scores if k in st.session_state.score_weights}
-                                    
-                                    if available_weights:
-                                        total_weight = sum(available_weights.values())
-                                        if total_weight > 0:
-                                            normalized_weights = {k: v/total_weight for k, v in available_weights.items()}
-                                            overall_score = sum(scores[k] * normalized_weights[k] for k in available_weights)
-                                        else:
-                                            overall_score = sum(scores.values()) / len(scores)
-                                    else:
-                                        overall_score = sum(scores.values()) / len(scores)
-                                    
-                                    # Track this score for historical analysis
-                                    track_stock_score(symbol, overall_score)
-                                    
-                                    recommendation, color = get_recommendation(overall_score)
-                                    
-                                    # Run full comprehensive analysis including technical analysis
-                                    with st.spinner(f"🔍 Running comprehensive analysis for {symbol}..."):
+                                    # Add delay to respect rate limits
+                                    if i < len(symbol_list) - 1:
+                                        time.sleep(REQUEST_DELAY)
+                            
+                            # Technical analysis if enabled
+                            if include_technical:
+                                with st.spinner(f"📈 Running technical analysis for {symbol}..."):
+                                    try:
                                         analyzer = ComprehensiveStockAnalyzer(symbol, "1y")
-                                        
-                                        # Fetch data and run all analysis
                                         if analyzer.fetch_all_data():
-                                            # Calculate all scores and signals
-                                            analyzer.calculate_fundamental_scores()
                                             analyzer.calculate_technical_indicators()
                                             analyzer.generate_technical_signals()
                                             analyzer.calculate_buying_prices()
                                             
-                                            # Generate combined recommendation
-                                            result = analyzer.generate_combined_recommendation()
-                                            
-                                            if result and len(result) == 3:
-                                                recommendation, color, combined_score = result
-                                                
-                                                # Display comprehensive analysis
-                                                display_comprehensive_analysis(analyzer)
-                                            else:
-                                                st.error(f"❌ Could not generate complete analysis for {symbol}")
-                                        else:
-                                            st.error(f"❌ Could not fetch market data for {symbol}")
-                                    successful_analyses.append(symbol)
-                                    
-                                    st.markdown("---")
-                                    
-                            except Exception as e:
-                                st.error(f"❌ Error analyzing {symbol}: {str(e)}")
-                        else:
-                            st.warning(f"⚠️ Could not fetch data for {symbol}")
+                                            combined_data['technical_data'] = {
+                                                'analyzer': analyzer,
+                                                'signals': analyzer.technical_signals,
+                                                'indicators': analyzer.data  # Use the actual data DataFrame
+                                            }
+                                    except Exception as e:
+                                        st.warning(f"⚠️ Technical analysis unavailable for {symbol}: {str(e)}")
+                            
+                            # Calculate final scores and recommendation
+                            if combined_data['scores']:
+                                # Calculate overall score using weighted averages
+                                available_weights = {k: st.session_state.score_weights.get(k, 0) 
+                                                   for k in combined_data['scores'] if k in st.session_state.score_weights}
+                                
+                                if available_weights:
+                                    total_weight = sum(available_weights.values())
+                                    if total_weight > 0:
+                                        normalized_weights = {k: v/total_weight for k, v in available_weights.items()}
+                                        overall_score = sum(combined_data['scores'][k] * normalized_weights[k] for k in available_weights)
+                                    else:
+                                        overall_score = sum(combined_data['scores'].values()) / len(combined_data['scores'])
+                                else:
+                                    overall_score = sum(combined_data['scores'].values()) / len(combined_data['scores'])
+                                
+                                recommendation, color = get_recommendation(overall_score)
+                                combined_data['recommendation'] = (recommendation, color, overall_score)
+                                
+                                # Track score for historical analysis
+                                track_stock_score(symbol, overall_score)
+                                
+                                # Display comprehensive results
+                                display_integrated_analysis(combined_data, include_technical)
+                                
+                                analysis_results[symbol] = combined_data
+                            else:
+                                st.error(f"❌ No data available for {symbol}")
+                            
+                            st.markdown("---")
                     
+                    # Clear progress indicators
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    # Summary of results
+                    successful_analyses = [s for s in analysis_results.keys()]
                     if successful_analyses:
                         st.success(f"✅ Successfully analyzed {len(successful_analyses)} stocks: {', '.join(successful_analyses)}")
+                        
+                        # Show comparison if multiple stocks analyzed
+                        if len(successful_analyses) > 1:
+                            st.subheader("📊 Comparison Summary")
+                            comparison_data = []
+                            for symbol, data in analysis_results.items():
+                                if data['recommendation']:
+                                    _, _, score = data['recommendation']
+                                    comparison_data.append({
+                                        'Symbol': symbol,
+                                        'Overall Score': f"{score:.1f}",
+                                        'Data Sources': ', '.join([
+                                            'Yahoo' if data['yahoo_data'] else '',
+                                            'Alpha Vantage' if data['alpha_data'] else '',
+                                            'Technical' if data['technical_data'] else ''
+                                        ]).strip(', '),
+                                        'Recommendation': data['recommendation'][0] if data['recommendation'] else 'N/A'
+                                    })
+                            
+                            if comparison_data:
+                                comparison_df = pd.DataFrame(comparison_data)
+                                st.dataframe(comparison_df, use_container_width=True, hide_index=True)
                     else:
                         st.error("❌ Could not analyze any stocks")
-                    
-                    if successful_analyses:
-                        st.success(f"✅ Successfully analyzed {len(successful_analyses)} stocks: {', '.join(successful_analyses)}")
-                    else:
-                        st.warning("⚠️ No stocks were successfully analyzed.")
         
         with analysis_tab2:
-            st.subheader("📊 Alpha Vantage Analysis")
-            st.warning("⚠️ Alpha Vantage has rate limits. Analysis may be slower.")
-            
-            symbols = st.text_input(
-                "Enter stock symbols (comma-separated)", 
-                "AAPL,MSFT,GOOGL", 
-                key="av",
-                help="Limited to avoid rate limits"
-            )
-            
-            if st.button("🔍 Analyze Stocks", key="av_btn"):
-                symbol_list = validate_symbols(symbols)
-                if not symbol_list:
-                    st.error("Please enter valid stock symbols")
-                else:
-                    if len(symbol_list) > 5:
-                        st.warning("⚠️ Limited to 5 symbols to avoid rate limits")
-                        symbol_list = symbol_list[:5]
-                    
-                    stock_data = {}
-                    progress_bar = st.progress(0)
-                    
-                    for i, symbol in enumerate(symbol_list):
-                        progress_bar.progress((i + 1) / len(symbol_list))
-                        
-                        with st.container():
-                            st.subheader(f"🔍 {symbol}")
-                            with st.spinner(f"Fetching data for {symbol}... (this may take a moment)"):
-                                overview = fetch_overview(symbol)
-                                
-                                if not overview:
-                                    st.error(f"❌ Symbol '{symbol}' not found or no data available")
-                                    continue
-                                
-                                industry = overview.get("Industry", None)
-                                sector = overview.get("Sector", None)
-                                industry_pe = INDUSTRY_PE_MAP.get(industry, INDUSTRY_PE_MAP.get(sector, INDUSTRY_PE_MAP["Unknown"]))
-                                st.write(f"Industry: {industry or sector or 'Unknown'} | Industry P/E: {industry_pe}")
-                                
-                                scores, _ = calculate_scores(symbol, industry_pe)
-                                
-                                if not scores or not overview:
-                                    st.error(f"❌ Symbol '{symbol}' not found or no data available")
-                                    continue
-                                
-                                company_name = overview.get("Name", "Unknown")
-                                price = fetch_price(symbol)
-                                total = sum(scores[k] * st.session_state.score_weights.get(k, 0) for k in scores)
-                                recommendation, color = get_recommendation(total)
-                                
-                                stock_data[symbol] = {
-                                    'total_score': total,
-                                    'recommendation': recommendation,
-                                    'color': color,
-                                    'scores': scores,
-                                    'overview': overview
-                                }
-                                
-                                show_stock_data(symbol, company_name, price, scores, total, recommendation, color, overview)
-                                st.divider()
-                                
-                                if i < len(symbol_list) - 1:
-                                    time.sleep(REQUEST_DELAY)
-                    
-                    progress_bar.empty()
-                    
-                    if len(stock_data) > 1:
-                        st.subheader("📊 Stock Comparison")
-                        comparison_fig = create_comparison_chart(stock_data)
-                        if comparison_fig:
-                            st.plotly_chart(comparison_fig, use_container_width=True)
-        
-        with analysis_tab3:
             st.subheader("🔍 Company Search")
             st.markdown("Search for companies by name to find their stock symbols")
             display_company_search()
@@ -6088,9 +6601,12 @@ def main():
             st.subheader("⚡ Quick Technical Analysis")
             st.info("Fast technical signals for day trading and quick decisions")
             
-            symbol = st.text_input("Enter Stock Symbol", value="AAPL", key="quick_tech")
+            with st.form("quick_tech_form"):
+                symbol = st.text_input("Enter Stock Symbol", value="AAPL", key="quick_tech", 
+                                         help="Enter a stock symbol and press Enter or click the button")
+                submitted = st.form_submit_button("⚡ Get Quick Signals", type="primary")
             
-            if st.button("⚡ Get Quick Signals", type="primary"):
+            if submitted and symbol:
                 with st.spinner(f"🔍 Analyzing {symbol}..."):
                     analyzer = ComprehensiveStockAnalyzer(symbol, "3mo")
                     
@@ -6160,9 +6676,12 @@ def main():
             st.subheader("🔄 Combined Technical & Fundamental Analysis")
             st.info("Comprehensive analysis combining multiple methodologies")
             
-            symbol = st.text_input("Enter Stock Symbol", value="AAPL", key="combined_analysis")
+            with st.form("combined_analysis_form"):
+                symbol = st.text_input("Enter Stock Symbol", value="AAPL", key="combined_analysis",
+                                         help="Enter a stock symbol and press Enter or click the button")
+                submitted = st.form_submit_button("🔄 Run Combined Analysis", type="primary")
             
-            if st.button("🔄 Run Combined Analysis", type="primary"):
+            if submitted and symbol:
                 with st.spinner(f"🔍 Running comprehensive analysis for {symbol}..."):
                     analyzer = ComprehensiveStockAnalyzer(symbol, "1y")
                     
@@ -6423,51 +6942,40 @@ def main():
                         # Display portfolio summary
                         st.markdown("### 💰 Portfolio Summary")
                         
-                        # Calculate portfolio metrics using async loading for current prices
+                        # Calculate portfolio metrics using simple price fetching
                         symbols = holdings['symbol'].tolist()
-                        
-                        # Use async loader to get current prices
-                        progress_placeholder = st.empty()
-                        
-                        def progress_callback(completed, total, message):
-                            progress = completed / total if total > 0 else 0
-                            progress_placeholder.progress(progress, text=f"Loading prices: {completed}/{total}")
-                        
-                        enhanced_manager.async_loader.set_progress_callback(progress_callback)
-                        price_results = enhanced_manager.async_loader.fetch_multiple_stocks_threaded(symbols)
-                        progress_placeholder.empty()
                         
                         # Calculate portfolio value and P&L
                         total_value = 0
                         total_cost = 0
                         portfolio_data = []
                         
-                        for _, holding in holdings.iterrows():
-                            symbol = holding['symbol']
-                            quantity = holding['quantity']
-                            avg_cost = holding['average_cost']
-                            
-                            current_price = 0
-                            if symbol in price_results and price_results[symbol].success:
-                                current_price = price_results[symbol].data.get('currentPrice', 0)
-                            
-                            market_value = quantity * current_price
-                            cost_basis = quantity * avg_cost
-                            pnl = market_value - cost_basis
-                            pnl_percent = (pnl / cost_basis * 100) if cost_basis > 0 else 0
-                            
-                            portfolio_data.append({
-                                'Symbol': symbol,
-                                'Quantity': quantity,
-                                'Avg Cost': f"${avg_cost:.2f}",
-                                'Current Price': f"${current_price:.2f}",
-                                'Market Value': f"${market_value:.2f}",
-                                'P&L': f"${pnl:.2f}",
-                                'P&L %': f"{pnl_percent:.1f}%"
-                            })
-                            
-                            total_value += market_value
-                            total_cost += cost_basis
+                        with st.spinner("Fetching current prices..."):
+                            for _, holding in holdings.iterrows():
+                                symbol = holding['symbol']
+                                quantity = holding['quantity']
+                                avg_cost = holding['average_cost']
+                                
+                                # Use simple price fetching with Danish stock support
+                                current_price = get_simple_current_price(symbol)
+                                
+                                market_value = quantity * current_price
+                                cost_basis = quantity * avg_cost
+                                pnl = market_value - cost_basis
+                                pnl_percent = (pnl / cost_basis * 100) if cost_basis > 0 else 0
+                                
+                                portfolio_data.append({
+                                    'Symbol': symbol,
+                                    'Quantity': quantity,
+                                    'Avg Cost': f"${avg_cost:.2f}",
+                                    'Current Price': f"${current_price:.2f}",
+                                    'Market Value': f"${market_value:.2f}",
+                                    'P&L': f"${pnl:.2f}",
+                                    'P&L %': f"{pnl_percent:.1f}%"
+                                })
+                                
+                                total_value += market_value
+                                total_cost += cost_basis
                         
                         # Display key metrics
                         total_pnl = total_value - total_cost
@@ -6523,17 +7031,35 @@ def main():
                     # Add new holding
                     st.markdown("### ➕ Add New Holding")
                     
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        new_symbol = st.text_input("Stock Symbol", placeholder="AAPL", key="enhanced_portfolio_new_symbol").upper()
-                    with col2:
-                        new_quantity = st.number_input("Quantity", min_value=0.01, value=1.0, step=0.01)
-                    with col3:
-                        new_price = st.number_input("Purchase Price", min_value=0.01, value=100.0, step=0.01)
+                    with st.form("add_holding_form", clear_on_submit=True):
+                        st.markdown("**Enter stock details:**")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            new_symbol = st.text_input(
+                                "Stock Symbol", 
+                                placeholder="AAPL", 
+                                key="enhanced_portfolio_new_symbol",
+                                help="Enter symbol and click 'Add Holding' button below"
+                            ).upper()
+                        with col2:
+                            new_quantity = st.number_input("Quantity", min_value=0.01, value=1.0, step=0.01)
+                        with col3:
+                            new_price = st.number_input("Purchase Price", min_value=0.01, value=100.0, step=0.01)
+                        
+                        # Add some spacing and make the submit button more prominent
+                        st.write("")
+                        col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+                        with col_btn2:
+                            submitted = st.form_submit_button("➕ Add Holding", type="primary", use_container_width=True)
                     
-                    if st.button("➕ Add Holding", type="primary"):
+                    if submitted:
                         if new_symbol:
                             try:
+                                # Show Danish stock mapping if applicable
+                                if new_symbol in DANISH_STOCKS:
+                                    mapped_symbol = DANISH_STOCKS[new_symbol]
+                                    st.info(f"🇩🇰 Danish stock detected: {new_symbol} → {mapped_symbol}")
+                                
                                 # Validate enhanced manager and database connection
                                 if not enhanced_manager or not enhanced_manager.portfolio_db:
                                     st.error("❌ Database connection not available")
@@ -6846,15 +7372,18 @@ def main():
                             scenario_changes = []
                             
                             if modification_type == "Add New Stock":
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    new_symbol = st.text_input("Stock Symbol", placeholder="AAPL", key="what_if_new_symbol").upper()
-                                with col2:
-                                    new_quantity = st.number_input("Quantity", min_value=1, value=10)
-                                with col3:
-                                    target_price = st.number_input("Target Price", min_value=0.01, value=100.0)
+                                with st.form("what_if_add_stock_form"):
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        new_symbol = st.text_input("Stock Symbol", placeholder="AAPL", key="what_if_new_symbol").upper()
+                                    with col2:
+                                        new_quantity = st.number_input("Quantity", min_value=1, value=10)
+                                    with col3:
+                                        target_price = st.number_input("Target Price", min_value=0.01, value=100.0)
+                                    
+                                    submitted = st.form_submit_button("➕ Add to Scenario")
                                 
-                                if new_symbol and st.button("➕ Add to Scenario"):
+                                if new_symbol and submitted:
                                     scenario_changes.append({
                                         'action': 'add',
                                         'symbol': new_symbol,
@@ -6912,7 +7441,7 @@ def main():
                                             current_portfolio = {}
                                             for _, holding in current_holdings.iterrows():
                                                 current_portfolio[holding['symbol']] = {
-                                                    'quantity': holding['quantity'],
+                                                    'shares': holding['quantity'],  # Use 'shares' instead of 'quantity'
                                                     'cost_basis': holding['average_cost']
                                                 }
                                             
@@ -6921,14 +7450,14 @@ def main():
                                             for change in st.session_state.what_if_scenario:
                                                 if change['action'] == 'add':
                                                     scenario_portfolio[change['symbol']] = {
-                                                        'quantity': change['quantity'],
+                                                        'shares': change['quantity'],  # Use 'shares' instead of 'quantity'
                                                         'cost_basis': change['price']
                                                     }
                                                 elif change['action'] == 'remove':
                                                     scenario_portfolio.pop(change['symbol'], None)
                                                 elif change['action'] == 'update_quantity':
                                                     if change['symbol'] in scenario_portfolio:
-                                                        scenario_portfolio[change['symbol']]['quantity'] = change['quantity']
+                                                        scenario_portfolio[change['symbol']]['shares'] = change['quantity']  # Use 'shares'
                                             
                                             # Analyze scenario
                                             analysis = what_if.analyze_portfolio_scenario(
@@ -6957,52 +7486,54 @@ def main():
                         st.markdown("### 📈 Key Metrics Comparison")
                         
                         current_metrics = analysis['current_metrics']
-                        scenario_metrics = analysis['scenario_metrics']
+                        scenario_metrics = analysis['simulated_metrics']  # Use 'simulated_metrics' instead of 'scenario_metrics'
                         
                         col1, col2, col3, col4 = st.columns(4)
                         
                         with col1:
-                            value_change = scenario_metrics['total_value'] - current_metrics['total_value']
+                            value_change = scenario_metrics.total_value - current_metrics.total_value
                             st.metric(
                                 "Portfolio Value",
-                                f"${scenario_metrics['total_value']:,.2f}",
+                                f"${scenario_metrics.total_value:,.2f}",
                                 f"{value_change:+,.2f}"
                             )
                         
                         with col2:
-                            risk_change = scenario_metrics['risk_score'] - current_metrics['risk_score']
+                            # Use diversification_score instead of risk_score
+                            div_change = scenario_metrics.diversification_score - current_metrics.diversification_score
                             st.metric(
-                                "Risk Score",
-                                f"{scenario_metrics['risk_score']:.1f}",
-                                f"{risk_change:+.1f}"
+                                "Diversification Score",
+                                f"{scenario_metrics.diversification_score:.1f}",
+                                f"{div_change:+.1f}"
                             )
                         
                         with col3:
-                            div_change = scenario_metrics['dividend_yield'] - current_metrics['dividend_yield']
+                            # Use average_score instead of dividend_yield
+                            score_change = scenario_metrics.average_score - current_metrics.average_score
                             st.metric(
-                                "Dividend Yield",
-                                f"{scenario_metrics['dividend_yield']:.2f}%",
-                                f"{div_change:+.2f}%"
+                                "Average Stock Score",
+                                f"{scenario_metrics.average_score:.2f}",
+                                f"{score_change:+.2f}"
                             )
                         
                         with col4:
-                            holdings_change = len(analysis['scenario_portfolio']) - len(analysis['current_portfolio'])
+                            holdings_change = scenario_metrics.symbol_count - current_metrics.symbol_count
                             st.metric(
                                 "Holdings Count",
-                                len(analysis['scenario_portfolio']),
+                                scenario_metrics.symbol_count,
                                 f"{holdings_change:+d}"
                             )
                         
                         # Sector allocation comparison
                         st.markdown("### 🏭 Sector Allocation Changes")
                         
-                        if 'sector_allocation' in current_metrics and 'sector_allocation' in scenario_metrics:
-                            sectors = set(current_metrics['sector_allocation'].keys()) | set(scenario_metrics['sector_allocation'].keys())
+                        if current_metrics.sector_breakdown and scenario_metrics.sector_breakdown:
+                            sectors = set(current_metrics.sector_breakdown.keys()) | set(scenario_metrics.sector_breakdown.keys())
                             
                             sector_comparison = []
                             for sector in sectors:
-                                current_pct = current_metrics['sector_allocation'].get(sector, 0)
-                                scenario_pct = scenario_metrics['sector_allocation'].get(sector, 0)
+                                current_pct = current_metrics.sector_breakdown.get(sector, 0)
+                                scenario_pct = scenario_metrics.sector_breakdown.get(sector, 0)
                                 change = scenario_pct - current_pct
                                 
                                 sector_comparison.append({
@@ -7015,39 +7546,51 @@ def main():
                             sector_df = pd.DataFrame(sector_comparison)
                             st.dataframe(sector_df, hide_index=True)
                         
-                        # Visual comparison
-                        st.markdown("### 📊 Portfolio Composition")
+                        # Visual comparison using available metrics
+                        st.markdown("### 📊 Portfolio Metrics Comparison")
                         
+                        # Create a comparison chart using available metrics
+                        metrics_comparison = {
+                            'Metric': ['Portfolio Value', 'Diversification Score', 'Average Score', 'Holdings Count'],
+                            'Current': [
+                                current_metrics.total_value,
+                                current_metrics.diversification_score,
+                                current_metrics.average_score,
+                                current_metrics.symbol_count
+                            ],
+                            'Scenario': [
+                                scenario_metrics.total_value,
+                                scenario_metrics.diversification_score,
+                                scenario_metrics.average_score,
+                                scenario_metrics.symbol_count
+                            ]
+                        }
+                        
+                        comparison_df = pd.DataFrame(metrics_comparison)
+                        
+                        # Create bar chart comparison
                         fig = go.Figure()
                         
-                        # Current portfolio pie chart
-                        current_symbols = list(analysis['current_portfolio'].keys())
-                        current_values = [p['quantity'] * 100 for p in analysis['current_portfolio'].values()]  # Mock values
-                        
-                        fig.add_trace(go.Pie(
-                            labels=current_symbols,
-                            values=current_values,
-                            name="Current",
-                            domain=dict(x=[0, 0.48])
+                        fig.add_trace(go.Bar(
+                            name='Current',
+                            x=comparison_df['Metric'],
+                            y=comparison_df['Current'],
+                            marker_color='lightblue'
                         ))
                         
-                        # Scenario portfolio pie chart
-                        scenario_symbols = list(analysis['scenario_portfolio'].keys())
-                        scenario_values = [p['quantity'] * 100 for p in analysis['scenario_portfolio'].values()]  # Mock values
-                        
-                        fig.add_trace(go.Pie(
-                            labels=scenario_symbols,
-                            values=scenario_values,
-                            name="Scenario",
-                            domain=dict(x=[0.52, 1])
+                        fig.add_trace(go.Bar(
+                            name='Scenario',
+                            x=comparison_df['Metric'],
+                            y=comparison_df['Scenario'],
+                            marker_color='lightcoral'
                         ))
                         
                         fig.update_layout(
-                            title="Portfolio Composition: Current vs Scenario",
-                            annotations=[
-                                dict(text='Current', x=0.24, y=0.5, font_size=16, showarrow=False),
-                                dict(text='Scenario', x=0.76, y=0.5, font_size=16, showarrow=False)
-                            ]
+                            title="Portfolio Metrics: Current vs Scenario",
+                            xaxis_title="Metrics",
+                            yaxis_title="Values",
+                            barmode='group',
+                            height=400
                         )
                         
                         st.plotly_chart(fig, use_container_width=True)
@@ -7101,21 +7644,25 @@ def main():
                         
                         st.markdown("### ⚠️ Risk Assessment")
                         
-                        current_risk = analysis['current_metrics']['risk_score']
-                        scenario_risk = analysis['scenario_metrics']['risk_score']
+                        current_metrics = analysis['current_metrics']
+                        scenario_metrics = analysis['simulated_metrics']
+                        
+                        # Use volatility_estimate as a proxy for risk
+                        current_risk = current_metrics.volatility_estimate
+                        scenario_risk = scenario_metrics.volatility_estimate
                         risk_change = scenario_risk - current_risk
                         
                         col1, col2, col3 = st.columns(3)
                         
                         with col1:
-                            st.metric("Current Risk Score", f"{current_risk:.1f}/10")
+                            st.metric("Current Volatility", f"{current_risk:.1f}%")
                         
                         with col2:
-                            st.metric("Scenario Risk Score", f"{scenario_risk:.1f}/10", f"{risk_change:+.1f}")
+                            st.metric("Scenario Volatility", f"{scenario_risk:.1f}%", f"{risk_change:+.1f}%")
                         
                         with col3:
-                            risk_level = "Low" if scenario_risk < 4 else "Medium" if scenario_risk < 7 else "High"
-                            color = "green" if scenario_risk < 4 else "orange" if scenario_risk < 7 else "red"
+                            risk_level = "Low" if scenario_risk < 15 else "Medium" if scenario_risk < 25 else "High"
+                            color = "green" if scenario_risk < 15 else "orange" if scenario_risk < 25 else "red"
                             st.markdown(f"**Risk Level:** <span style='color: {color}'>{risk_level}</span>", unsafe_allow_html=True)
                         
                         # Risk factors
@@ -7176,7 +7723,9 @@ def main():
         st.subheader("📊 Current Danish Stocks")
         
         # Search and filter
-        search_term = st.text_input("🔍 Search stocks", placeholder="Search by symbol or name...", key="danish_search")
+        with st.form("danish_search_form"):
+            search_term = st.text_input("🔍 Search stocks", placeholder="Search by symbol or name...", key="danish_search")
+            st.form_submit_button("🔍 Search")
         
         # Convert to DataFrame for better display
         danish_df = pd.DataFrame([
@@ -7226,15 +7775,18 @@ def main():
         
         with col2:
             st.markdown("**➕ Add New Stock**")
-            new_name = st.text_input("Display Name", placeholder="e.g., NOVO-B", key="new_danish_name")
-            new_symbol = st.text_input("Yahoo Symbol", placeholder="e.g., NOVO-B.CO", key="new_danish_symbol")
-            
-            if st.button("➕ Add Stock") and new_name and new_symbol:
-                if new_name not in DANISH_STOCKS:
-                    st.success(f"Would add: {new_name} -> {new_symbol}")
-                    st.info("Note: This is a demo. In production, this would update the stock database.")
-                else:
-                    st.warning(f"{new_name} already exists")
+            with st.form("add_danish_stock_form"):
+                new_name = st.text_input("Display Name", placeholder="e.g., NOVO-B", key="new_danish_name")
+                new_symbol = st.text_input("Yahoo Symbol", placeholder="e.g., NOVO-B.CO", key="new_danish_symbol")
+                
+                add_button = st.form_submit_button("➕ Add Stock")
+                
+                if add_button and new_name and new_symbol:
+                    if new_name not in DANISH_STOCKS:
+                        st.success(f"Would add: {new_name} -> {new_symbol}")
+                        st.info("Note: This is a demo. In production, this would update the stock database.")
+                    else:
+                        st.warning(f"{new_name} already exists")
 
     # --- Performance Benchmarking ---
     target_tab = tab7 if st.session_state.get('enhanced_features_enabled', False) else tab6
@@ -7606,13 +8158,15 @@ def main():
             # Manual comparison tool
             st.subheader("🔧 Manual Comparison Tool")
             
-            symbols_for_comparison = st.text_input(
-                "Enter symbols to compare (comma-separated)",
-                placeholder="AAPL, MSFT, GOOGL",
-                key="manual_comparison"
-            )
+            with st.form("manual_comparison_form"):
+                symbols_for_comparison = st.text_input(
+                    "Enter symbols to compare (comma-separated)",
+                    placeholder="AAPL, MSFT, GOOGL",
+                    key="manual_comparison"
+                )
+                submitted = st.form_submit_button("🔍 Compare Stocks", type="primary")
             
-            if st.button("🔍 Compare Stocks", type="primary") and symbols_for_comparison:
+            if submitted and symbols_for_comparison:
                 symbol_list = [s.strip().upper() for s in symbols_for_comparison.split(',') if s.strip()]
                 
                 if len(symbol_list) < 2:

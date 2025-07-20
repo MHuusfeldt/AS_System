@@ -78,6 +78,11 @@ class WhatIfAnalyzer:
                 market_data = self._get_market_data(symbol)
                 shares = holding.get('shares', 0)
                 current_price = market_data.get('current_price', 0)
+                
+                # Skip if no shares or no price data
+                if shares <= 0 or current_price <= 0:
+                    continue
+                    
                 position_value = shares * current_price
                 
                 # Get or calculate stock score
@@ -301,6 +306,11 @@ class WhatIfAnalyzer:
         
         # Simple volatility estimate based on weighted beta
         total_value = sum(stock['position_value'] for stock in portfolio_data)
+        
+        # Handle zero total value
+        if total_value == 0:
+            return 0
+        
         weighted_volatility = 0
         
         for stock in portfolio_data:
@@ -398,6 +408,86 @@ class WhatIfAnalyzer:
         recommendations = []
         
         # Score improvement
+        score_change = simulated.average_score - current.average_score
+        if score_change > 0.5:
+            recommendations.append(f"✅ Portfolio quality improvement: +{score_change:.2f} points")
+        elif score_change < -0.5:
+            recommendations.append(f"⚠️ Portfolio quality decrease: {score_change:.2f} points")
+        
+        # Diversification
+        div_change = simulated.diversification_score - current.diversification_score
+        if div_change > 5:
+            recommendations.append("✅ Improved diversification")
+        elif div_change < -5:
+            recommendations.append("⚠️ Reduced diversification")
+        
+        # Volatility
+        vol_change = simulated.volatility_estimate - current.volatility_estimate
+        if vol_change > 0.1:
+            recommendations.append("⚠️ Increased portfolio volatility")
+        elif vol_change < -0.1:
+            recommendations.append("✅ Reduced portfolio volatility")
+        
+        # Symbol count
+        if simulated.symbol_count > current.symbol_count:
+            recommendations.append("✅ Increased portfolio breadth")
+        elif simulated.symbol_count < current.symbol_count:
+            recommendations.append("ℹ️ Reduced portfolio complexity")
+        
+        if not recommendations:
+            recommendations.append("ℹ️ No significant changes detected")
+        
+        return recommendations
+    
+    def analyze_portfolio_scenario(self, current_portfolio: Dict[str, Any], 
+                                 scenario_portfolio: Dict[str, Any], 
+                                 scenario_name: str = "Scenario") -> Dict[str, Any]:
+        """Analyze a portfolio scenario by comparing current vs proposed portfolio"""
+        
+        # Set base portfolio
+        self.set_base_portfolio(current_portfolio)
+        
+        # Clear any existing changes
+        self.clear_proposed_changes()
+        
+        # Calculate differences between current and scenario portfolios
+        all_symbols = set(list(current_portfolio.keys()) + list(scenario_portfolio.keys()))
+        
+        for symbol in all_symbols:
+            current_holding = current_portfolio.get(symbol, {})
+            scenario_holding = scenario_portfolio.get(symbol, {})
+            
+            current_qty = current_holding.get('shares', 0)  # Use 'shares' instead of 'quantity'
+            scenario_qty = scenario_holding.get('shares', 0)  # Use 'shares' instead of 'quantity'
+            
+            if current_qty == 0 and scenario_qty > 0:
+                # Adding new position
+                self.add_proposed_change(PortfolioChange(
+                    action='add',
+                    symbol=symbol,
+                    shares=scenario_qty
+                ))
+            elif current_qty > 0 and scenario_qty == 0:
+                # Removing position
+                self.add_proposed_change(PortfolioChange(
+                    action='remove',
+                    symbol=symbol,
+                    shares=0  # Remove completely
+                ))
+            elif current_qty != scenario_qty:
+                # Modifying position
+                self.add_proposed_change(PortfolioChange(
+                    action='modify',
+                    symbol=symbol,
+                    shares=scenario_qty
+                ))
+        
+        # Generate comprehensive analysis
+        analysis_report = self.generate_comparison_report()
+        analysis_report['scenario_name'] = scenario_name
+        analysis_report['proposed_changes'] = len(self.proposed_changes)
+        
+        return analysis_report
         score_diff = simulated.average_score - current.average_score
         if score_diff > 0.5:
             recommendations.append(f"✅ Score improves by {score_diff:.1f} points - Good change!")
