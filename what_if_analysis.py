@@ -683,36 +683,11 @@ class WhatIfAnalyzer:
         analysis_report['scenario_name'] = scenario_name
         analysis_report['proposed_changes'] = len(self.proposed_changes)
         
+        # Include the scenario portfolio data for risk analysis
+        analysis_report['scenario_portfolio'] = scenario_portfolio.copy()
+        analysis_report['current_portfolio'] = current_portfolio.copy()
+        
         return analysis_report
-        score_diff = simulated.average_score - current.average_score
-        if score_diff > 0.5:
-            recommendations.append(f"✅ Score improves by {score_diff:.1f} points - Good change!")
-        elif score_diff < -0.5:
-            recommendations.append(f"⚠️ Score decreases by {abs(score_diff):.1f} points - Consider alternatives")
-        
-        # Diversification
-        div_diff = simulated.diversification_score - current.diversification_score
-        if div_diff > 1:
-            recommendations.append("✅ Diversification improves significantly")
-        elif div_diff < -1:
-            recommendations.append("⚠️ Diversification decreases - Consider adding different sectors")
-        
-        # Risk assessment
-        current_risk = current.risk_metrics.get('risk_level', 'Unknown')
-        simulated_risk = simulated.risk_metrics.get('risk_level', 'Unknown')
-        
-        if current_risk != simulated_risk:
-            if simulated_risk == 'High':
-                recommendations.append("🔴 Risk level increases to HIGH - Review position sizes")
-            elif simulated_risk == 'Low' and current_risk != 'Low':
-                recommendations.append("✅ Risk level decreases - More conservative portfolio")
-        
-        # Concentration warnings
-        max_concentration = simulated.risk_metrics.get('max_position_concentration', 0)
-        if max_concentration > 15:
-            recommendations.append(f"⚠️ Largest position is {max_concentration:.1f}% - Consider reducing concentration")
-        
-        return recommendations
 
 class StreamlitWhatIfInterface:
     """Streamlit interface for What-If analysis"""

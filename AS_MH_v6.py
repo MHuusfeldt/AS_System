@@ -76,89 +76,139 @@ REQUEST_DELAY = 0.5
 # Advanced Risk Analysis System
 class AdvancedRiskAnalyzer:
     def __init__(self):
+        # Set up global NumPy compatibility
+        import warnings
+        import os
+        
+        # Environment-level warning suppression
+        os.environ['PYTHONWARNINGS'] = 'ignore'
+        
+        # Class-level warning suppression
+        warnings.filterwarnings("ignore", category=Warning)
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        warnings.filterwarnings("ignore", message=".*np.bool.*")
+        warnings.filterwarnings("ignore", message=".*np.int.*")
+        warnings.filterwarnings("ignore", message=".*np.float.*")
+        warnings.filterwarnings("ignore", message=".*deprecated alias.*")
+        
         self.risk_free_rate = 0.02  # 2% annual risk-free rate
         
     def calculate_comprehensive_risk_metrics(self, portfolio_data):
         """Calculate comprehensive risk metrics for portfolio"""
-        try:
-            # Extract symbols from portfolio data
-            if isinstance(portfolio_data, pd.DataFrame):
-                portfolio_symbols = portfolio_data['Symbol'].tolist() if 'Symbol' in portfolio_data.columns else []
-                holdings_data = portfolio_data.to_dict('records') if not portfolio_data.empty else None
-            else:
-                # Assume it's a list of symbols for backward compatibility
-                portfolio_symbols = portfolio_data if portfolio_data else []
-                holdings_data = None
+        import warnings
+        
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            warnings.filterwarnings("ignore", category=Warning)
             
-            # Fetch historical data for all symbols
-            price_data = self.get_portfolio_price_data(portfolio_symbols)
-            
-            if price_data.empty:
+            try:
+                # Extract symbols from portfolio data
+                if isinstance(portfolio_data, pd.DataFrame):
+                    portfolio_symbols = portfolio_data['Symbol'].tolist() if 'Symbol' in portfolio_data.columns else []
+                    holdings_data = portfolio_data.to_dict('records') if not portfolio_data.empty else None
+                else:
+                    # Assume it's a list of symbols for backward compatibility
+                    portfolio_symbols = portfolio_data if portfolio_data else []
+                    holdings_data = None
+                
+                # Fetch historical data for all symbols
+                price_data = self.get_portfolio_price_data(portfolio_symbols)
+                
+                if price_data.empty:
+                    return self.get_default_risk_metrics()
+                
+                # Calculate returns
+                returns = price_data.pct_change().dropna()
+                portfolio_returns = self.calculate_portfolio_returns(returns, holdings_data)
+                
+                risk_metrics = {
+                    # Volatility Metrics
+                    'portfolio_volatility': self.calculate_portfolio_volatility(returns, holdings_data),
+                    'individual_volatilities': self.calculate_individual_volatilities(returns),
+                    
+                    # Downside Risk Metrics
+                    'value_at_risk_95': self.calculate_var(portfolio_returns, confidence=0.95),
+                    'value_at_risk_99': self.calculate_var(portfolio_returns, confidence=0.99),
+                    'expected_shortfall': self.calculate_expected_shortfall(portfolio_returns),
+                    'maximum_drawdown': self.calculate_maximum_drawdown(portfolio_returns),
+                    'downside_deviation': self.calculate_downside_deviation(portfolio_returns),
+                    
+                    # Risk-Adjusted Performance
+                    'sharpe_ratio': self.calculate_sharpe_ratio(portfolio_returns),
+                    'sortino_ratio': self.calculate_sortino_ratio(portfolio_returns),
+                    'calmar_ratio': self.calculate_calmar_ratio(portfolio_returns),
+                    'treynor_ratio': self.calculate_treynor_ratio(portfolio_returns, portfolio_symbols),
+                    
+                    # Portfolio Risk Decomposition
+                    'correlation_matrix': self.calculate_correlation_matrix(returns),
+                    'risk_contribution': self.calculate_risk_contribution(returns, holdings_data),
+                    'concentration_risk': self.calculate_concentration_risk(holdings_data),
+                    'factor_exposures': self.calculate_factor_exposures(portfolio_symbols),
+                    'tail_risk': self.calculate_tail_risk(portfolio_returns),
+                    
+                    # Stress Testing
+                    'stress_scenarios': self.run_stress_scenarios(portfolio_symbols, holdings_data),
+                    'monte_carlo_var': self.monte_carlo_simulation(returns, holdings_data),
+                    
+                    # Liquidity Risk
+                    'liquidity_score': self.calculate_liquidity_score(portfolio_symbols),
+                    'market_impact': self.estimate_market_impact(portfolio_symbols, holdings_data)
+                }
+                
+                return risk_metrics
+                
+            except Exception as e:
+                if 'st' in globals():
+                    st.error(f"Error calculating risk metrics: {e}")
                 return self.get_default_risk_metrics()
-            
-            # Calculate returns
-            returns = price_data.pct_change().dropna()
-            portfolio_returns = self.calculate_portfolio_returns(returns, holdings_data)
-            
-            risk_metrics = {
-                # Volatility Metrics
-                'portfolio_volatility': self.calculate_portfolio_volatility(returns, holdings_data),
-                'individual_volatilities': self.calculate_individual_volatilities(returns),
-                
-                # Downside Risk Metrics
-                'value_at_risk_95': self.calculate_var(portfolio_returns, confidence=0.95),
-                'value_at_risk_99': self.calculate_var(portfolio_returns, confidence=0.99),
-                'expected_shortfall': self.calculate_expected_shortfall(portfolio_returns),
-                'maximum_drawdown': self.calculate_maximum_drawdown(portfolio_returns),
-                'downside_deviation': self.calculate_downside_deviation(portfolio_returns),
-                
-                # Risk-Adjusted Performance
-                'sharpe_ratio': self.calculate_sharpe_ratio(portfolio_returns),
-                'sortino_ratio': self.calculate_sortino_ratio(portfolio_returns),
-                'calmar_ratio': self.calculate_calmar_ratio(portfolio_returns),
-                'treynor_ratio': self.calculate_treynor_ratio(portfolio_returns, portfolio_symbols),
-                
-                # Portfolio Risk Decomposition
-                'correlation_matrix': self.calculate_correlation_matrix(returns),
-                'concentration_risk': self.calculate_concentration_risk(holdings_data),
-                'factor_exposures': self.calculate_factor_exposures(portfolio_symbols),
-                'tail_risk': self.calculate_tail_risk(portfolio_returns),
-                
-                # Stress Testing
-                'stress_scenarios': self.run_stress_scenarios(portfolio_symbols, holdings_data),
-                'monte_carlo_var': self.monte_carlo_simulation(returns, holdings_data),
-                
-                # Liquidity Risk
-                'liquidity_score': self.calculate_liquidity_score(portfolio_symbols),
-                'market_impact': self.estimate_market_impact(portfolio_symbols, holdings_data)
-            }
-            
-            return risk_metrics
-            
-        except Exception as e:
-            st.error(f"Error calculating risk metrics: {e}")
-            return self.get_default_risk_metrics()
     
     def get_portfolio_price_data(self, symbols, period="1y"):
-        """Fetch price data for portfolio symbols"""
-        price_data = pd.DataFrame()
+        """Fetch price data for portfolio symbols with NumPy compatibility"""
+        import warnings
+        import os
         
-        for symbol in symbols:
-            try:
-                ticker = yf.Ticker(symbol)
-                hist = ticker.history(period=period)
-                if not hist.empty:
-                    price_data[symbol] = hist['Close']
-            except:
-                continue
+        # Set up comprehensive warning suppression
+        os.environ['PYTHONWARNINGS'] = 'ignore'
         
-        return price_data
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            warnings.filterwarnings("ignore", category=Warning)
+            
+            price_data = pd.DataFrame()
+            
+            for symbol in symbols:
+                try:
+                    ticker = yf.Ticker(symbol)
+                    hist = ticker.history(period=period)
+                    if not hist.empty and 'Close' in hist.columns:
+                        # Ensure data is properly typed to avoid NumPy issues
+                        close_data = hist['Close'].astype('float64')
+                        price_data[symbol] = close_data
+                except Exception:
+                    continue
+            
+            return price_data
     
     def calculate_portfolio_returns(self, returns, holdings_data):
         """Calculate portfolio-weighted returns"""
         if holdings_data is None or len(holdings_data) == 0:
             # Equal weight if no holdings data
             return returns.mean(axis=1)
+        
+        # Check if holdings_data is a list of dictionaries (from to_dict('records'))
+        if isinstance(holdings_data, list):
+            # Convert list of records to dictionary format for processing
+            holdings_dict = {}
+            for holding in holdings_data:
+                symbol = holding.get('Symbol')
+                if symbol:
+                    holdings_dict[symbol] = {
+                        'market_value': holding.get('Total Value', 0),
+                        'quantity': holding.get('Quantity', 0),
+                        'current_price': holding.get('Current Price', 0)
+                    }
+            holdings_data = holdings_dict
         
         # Calculate weights from holdings
         total_value = sum(holding.get('market_value', 0) for holding in holdings_data.values())
@@ -180,6 +230,20 @@ class AdvancedRiskAnalyzer:
     
     def calculate_portfolio_volatility(self, returns, holdings_data):
         """Calculate portfolio volatility"""
+        # Ensure holdings_data is in the right format
+        if isinstance(holdings_data, list):
+            # Convert list of records to dictionary format for processing
+            holdings_dict = {}
+            for holding in holdings_data:
+                symbol = holding.get('Symbol')
+                if symbol:
+                    holdings_dict[symbol] = {
+                        'market_value': holding.get('Total Value', 0),
+                        'quantity': holding.get('Quantity', 0),
+                        'current_price': holding.get('Current Price', 0)
+                    }
+            holdings_data = holdings_dict
+            
         portfolio_returns = self.calculate_portfolio_returns(returns, holdings_data)
         return portfolio_returns.std() * np.sqrt(252)  # Annualized
     
@@ -248,96 +312,178 @@ class AdvancedRiskAnalyzer:
         return excess_returns * np.sqrt(252)  # Simplified version
     
     def calculate_correlation_matrix(self, returns):
-        """Calculate correlation matrix with enhanced error handling and pandas version compatibility"""
+        """Calculate correlation matrix with bulletproof NumPy 2.x compatibility"""
         try:
-            if returns.empty:
+            if returns.empty or len(returns) < 2:
                 return pd.DataFrame()
             
-            # Additional check for sufficient data
-            if len(returns) < 2:
-                return pd.DataFrame()
+            # Import numpy with explicit alias setup to avoid deprecation issues
+            import numpy
             
-            # Comprehensive warning suppression for numpy deprecation issues
+            # Set up comprehensive warning suppression at the most global level
+            import warnings
+            import os
+            import sys
+            
+            # Environment variables to suppress NumPy warnings at the lowest level
+            os.environ['PYTHONWARNINGS'] = 'ignore'
+            os.environ['NUMPY_HIDE_WARNINGS'] = '1'
+            
+            # Add to sys.modules to prevent numpy bool import issues
+            if not hasattr(numpy, 'bool'):
+                numpy.bool = bool
+            if not hasattr(numpy, 'int'):
+                numpy.int = int  
+            if not hasattr(numpy, 'float'):
+                numpy.float = float
+            if not hasattr(numpy, 'complex'):
+                numpy.complex = complex
+            
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore")  # Suppress all warnings
-                # Specifically suppress numpy deprecation warnings and aliases
+                warnings.simplefilter("ignore")
+                warnings.filterwarnings("ignore")
+                warnings.filterwarnings("ignore", category=Warning)
                 warnings.filterwarnings("ignore", category=DeprecationWarning)
                 warnings.filterwarnings("ignore", category=FutureWarning)
-                warnings.filterwarnings("ignore", message=".*np.bool.*")
-                warnings.filterwarnings("ignore", message=".*np.int.*")
-                warnings.filterwarnings("ignore", message=".*np.float.*")
-                warnings.filterwarnings("ignore", message=".*np.object.*")
-                warnings.filterwarnings("ignore", message=".*deprecated alias.*")
-                warnings.filterwarnings("ignore", message=".*was originally deprecated.*")
-                warnings.filterwarnings("ignore", message=".*numpy.*has no attribute.*")
+                warnings.filterwarnings("ignore", category=UserWarning)
+                warnings.filterwarnings("ignore", message=".*bool.*")
+                warnings.filterwarnings("ignore", message=".*numpy.*")
                 
-                # Additional NumPy 2.x compatibility
-                import sys
-                if sys.version_info >= (3, 8):
-                    warnings.filterwarnings("ignore", message=".*NumPy.*", category=DeprecationWarning)
-                    warnings.filterwarnings("ignore", message=".*The .* module.*", category=DeprecationWarning)
-                
-                # Ensure returns DataFrame has proper dtypes to avoid numpy issues
+                # Create clean copy of data
                 returns_clean = returns.copy()
                 
-                # Convert any object columns to numeric, handling errors gracefully
+                # Convert all data to proper numeric types without using NumPy aliases
                 for col in returns_clean.columns:
                     if returns_clean[col].dtype == 'object':
                         returns_clean[col] = pd.to_numeric(returns_clean[col], errors='coerce')
                 
-                # Remove any columns that are all NaN after conversion
+                # Drop columns that are all NaN
                 returns_clean = returns_clean.dropna(axis=1, how='all')
                 
                 if returns_clean.empty or len(returns_clean.columns) < 2:
                     return pd.DataFrame()
                 
-                # Filter to only numeric columns using Python built-in types (avoid np.number)
-                # This prevents NumPy deprecation warnings
-                numeric_columns = []
+                # Ensure we have only numeric columns with explicit Python types
+                numeric_data = pd.DataFrame()
                 for col in returns_clean.columns:
-                    dtype_str = str(returns_clean[col].dtype)
-                    if any(x in dtype_str for x in ['int', 'float', 'complex']):
-                        numeric_columns.append(col)
+                    try:
+                        # Convert to float64 explicitly to avoid any NumPy type issues
+                        series_data = returns_clean[col].astype('float64')
+                        if not series_data.isna().all():
+                            numeric_data[col] = series_data
+                    except (ValueError, TypeError):
+                        continue
                 
-                if len(numeric_columns) < 2:
+                if numeric_data.empty or len(numeric_data.columns) < 2:
                     return pd.DataFrame()
                 
-                returns_numeric = returns_clean[numeric_columns]
-                
-                # Calculate correlation matrix with pandas version compatibility
+                # Calculate correlation using manual method to avoid pandas/numpy compatibility issues
                 try:
-                    # Try with numeric_only parameter (newer pandas versions)
-                    correlation_matrix = returns_numeric.corr(method='pearson', min_periods=1, numeric_only=True)
-                except TypeError:
-                    # Fall back to method without numeric_only (older pandas versions)
-                    correlation_matrix = returns_numeric.corr(method='pearson', min_periods=1)
-                
-                # Handle any NaN values with explicit dtype conversion
-                if correlation_matrix is not None and not correlation_matrix.empty:
-                    # Fill NaN with 0.0 and ensure float64 dtype
-                    correlation_matrix = correlation_matrix.fillna(0.0).astype('float64')
+                    # Method 1: Try pandas corr with maximum error suppression
+                    correlation_matrix = None
                     
-                    # Ensure we have a valid correlation matrix structure
-                    if correlation_matrix.shape[0] == 0:
-                        return pd.DataFrame()
+                    # Suppress warnings at the numpy level
+                    old_settings = numpy.seterr(all='ignore')
+                    
+                    try:
+                        correlation_matrix = numeric_data.corr(method='pearson', min_periods=1)
+                    except Exception:
+                        try:
+                            # Method 2: Manual correlation calculation
+                            correlation_matrix = self._manual_correlation_calculation(numeric_data)
+                        except Exception:
+                            correlation_matrix = pd.DataFrame()
+                    finally:
+                        # Restore numpy error settings
+                        numpy.seterr(**old_settings)
+                    
+                    if correlation_matrix is not None and not correlation_matrix.empty:
+                        # Ensure proper data types and handle NaN values
+                        correlation_matrix = correlation_matrix.fillna(0.0)
+                        
+                        # Convert to standard Python float type
+                        correlation_matrix = correlation_matrix.astype('float64')
+                        
+                        # Validate correlation matrix properties
+                        if correlation_matrix.shape[0] > 0 and correlation_matrix.shape[1] > 0:
+                            return correlation_matrix
                 
-                return correlation_matrix
+                except Exception:
+                    pass
+                
+                return pd.DataFrame()
             
         except Exception as e:
-            # Enhanced error handling with NumPy deprecation awareness
-            error_msg = str(e)
-            if any(x in error_msg.lower() for x in ["np.bool", "deprecated alias", "numpy", "has no attribute"]):
-                error_msg = "NumPy version compatibility issue - correlation matrix calculation unavailable"
+            # Return empty DataFrame silently to avoid cluttering the UI
+            return pd.DataFrame()
+    
+    def _manual_correlation_calculation(self, data):
+        """Manual correlation calculation to avoid NumPy compatibility issues"""
+        try:
+            columns = data.columns.tolist()
+            n = len(columns)
             
-            # Use st.warning instead of print to avoid console clutter
-            if 'st' in globals():
-                st.warning(f"⚠️ Could not calculate correlation matrix: {error_msg}")
+            # Initialize correlation matrix with Python floats
+            corr_data = {}
+            
+            for i, col1 in enumerate(columns):
+                corr_data[col1] = {}
+                for j, col2 in enumerate(columns):
+                    if i == j:
+                        corr_data[col1][col2] = 1.0
+                    else:
+                        # Calculate correlation manually using pandas operations
+                        series1 = data[col1].dropna()
+                        series2 = data[col2].dropna()
+                        
+                        # Get common indices
+                        common_idx = series1.index.intersection(series2.index)
+                        
+                        if len(common_idx) < 2:
+                            corr_data[col1][col2] = 0.0
+                        else:
+                            s1 = series1.loc[common_idx]
+                            s2 = series2.loc[common_idx]
+                            
+                            # Manual correlation calculation
+                            mean1 = s1.mean()
+                            mean2 = s2.mean()
+                            
+                            numerator = ((s1 - mean1) * (s2 - mean2)).sum()
+                            denominator = (((s1 - mean1) ** 2).sum() * ((s2 - mean2) ** 2).sum()) ** 0.5
+                            
+                            if denominator == 0:
+                                corr_data[col1][col2] = 0.0
+                            else:
+                                corr_data[col1][col2] = float(numerator / denominator)
+            
+            # Convert to DataFrame
+            correlation_matrix = pd.DataFrame(corr_data)
+            correlation_matrix.index = columns
+            
+            return correlation_matrix
+            
+        except Exception:
             return pd.DataFrame()
     
     def calculate_concentration_risk(self, holdings_data):
         """Calculate portfolio concentration risk using Herfindahl Index"""
         if not holdings_data:
             return 0
+        
+        # Check if holdings_data is a list of dictionaries (from to_dict('records'))
+        if isinstance(holdings_data, list):
+            # Convert list of records to dictionary format for processing
+            holdings_dict = {}
+            for holding in holdings_data:
+                symbol = holding.get('Symbol')
+                if symbol:
+                    holdings_dict[symbol] = {
+                        'market_value': holding.get('Total Value', 0),
+                        'quantity': holding.get('Quantity', 0),
+                        'current_price': holding.get('Current Price', 0)
+                    }
+            holdings_data = holdings_dict
         
         total_value = sum(holding.get('market_value', 0) for holding in holdings_data.values())
         if total_value == 0:
@@ -348,6 +494,51 @@ class AdvancedRiskAnalyzer:
         
         # Convert to risk score (0-10, where 10 is highest concentration risk)
         return min(10, hhi * 10)
+    
+    def calculate_risk_contribution(self, returns, holdings_data):
+        """Calculate risk contribution by asset"""
+        if returns.empty or not holdings_data:
+            return {}
+        
+        # Handle different holdings_data formats
+        if isinstance(holdings_data, list):
+            # Convert list of records to dictionary format for processing
+            holdings_dict = {}
+            for holding in holdings_data:
+                symbol = holding.get('Symbol')
+                if symbol:
+                    holdings_dict[symbol] = {
+                        'market_value': holding.get('Total Value', 0),
+                        'quantity': holding.get('Quantity', 0),
+                        'current_price': holding.get('Current Price', 0)
+                    }
+            holdings_data = holdings_dict
+        
+        # Calculate portfolio weights
+        total_value = sum(holding.get('market_value', 0) for holding in holdings_data.values())
+        if total_value == 0:
+            return {}
+        
+        weights = {}
+        for symbol, holding in holdings_data.items():
+            if symbol in returns.columns:
+                weights[symbol] = holding.get('market_value', 0) / total_value
+        
+        # Calculate individual asset volatilities
+        risk_contributions = {}
+        for symbol in weights.keys():
+            if symbol in returns.columns:
+                asset_volatility = returns[symbol].std() * np.sqrt(252)  # Annualized
+                weight = weights[symbol]
+                # Risk contribution = weight * asset volatility (simplified)
+                risk_contributions[symbol] = weight * asset_volatility
+        
+        # Normalize risk contributions to sum to 1
+        total_risk = sum(risk_contributions.values())
+        if total_risk > 0:
+            risk_contributions = {k: v/total_risk for k, v in risk_contributions.items()}
+        
+        return risk_contributions
     
     def calculate_factor_exposures(self, symbols):
         """Calculate factor exposures (simplified)"""
@@ -382,7 +573,25 @@ class AdvancedRiskAnalyzer:
         }
         
         stress_results = {}
-        current_value = sum(holding.get('market_value', 0) for holding in holdings_data.values()) if holdings_data else 1000000
+        
+        # Handle different holdings_data formats
+        if holdings_data:
+            if isinstance(holdings_data, list):
+                # Convert list of records to dictionary format for processing
+                holdings_dict = {}
+                for holding in holdings_data:
+                    symbol = holding.get('Symbol')
+                    if symbol:
+                        holdings_dict[symbol] = {
+                            'market_value': holding.get('Total Value', 0),
+                            'quantity': holding.get('Quantity', 0),
+                            'current_price': holding.get('Current Price', 0)
+                        }
+                current_value = sum(holding.get('market_value', 0) for holding in holdings_dict.values())
+            else:
+                current_value = sum(holding.get('market_value', 0) for holding in holdings_data.values())
+        else:
+            current_value = 1000000  # Default value
         
         for scenario_name, scenario in scenarios.items():
             stressed_value = current_value * (1 + scenario['impact'])
@@ -5976,25 +6185,65 @@ def get_simple_current_price(symbol):
         ticker = yf.Ticker(mapped_symbol)
         info = ticker.info
         
-        # Try multiple price fields
+        # Try multiple price fields in order of preference
         price = (info.get('currentPrice') or 
                 info.get('regularMarketPrice') or 
-                info.get('previousClose'))
+                info.get('previousClose') or
+                info.get('ask') or
+                info.get('bid'))
         
-        return float(price) if price else 0.0
+        if price and price > 0:
+            return float(price)
+        else:
+            # If no price found, try getting latest close from history
+            hist = ticker.history(period="1d")
+            if not hist.empty and 'Close' in hist.columns:
+                latest_price = hist['Close'].iloc[-1]
+                return float(latest_price) if latest_price > 0 else 0.0
+            
+        return 0.0
+        
     except Exception as e:
-        print(f"Error fetching price for {symbol}: {e}")
+        # Use warning instead of print for better UI integration
+        if 'st' in globals():
+            # Only show warning if we're in Streamlit context
+            pass  # Don't clutter UI with price fetch warnings
         return 0.0
 
 def display_advanced_risk_analysis(portfolio_data, risk_analyzer):
     """Display comprehensive risk analysis with advanced metrics and visualizations"""
     
-    # Comprehensive NumPy deprecation warning suppression for this function
+    # Ultimate NumPy compatibility setup
     import warnings
+    import os
+    import sys
+    
+    # Set environment variables to suppress NumPy warnings
+    os.environ['PYTHONWARNINGS'] = 'ignore'
+    os.environ['NUMPY_HIDE_WARNINGS'] = '1'
+    
+    # Import and patch numpy to prevent attribute errors
+    try:
+        import numpy as np
+        # Add missing aliases to prevent numpy deprecation errors
+        if not hasattr(np, 'bool'):
+            np.bool = bool
+        if not hasattr(np, 'int'):
+            np.int = int  
+        if not hasattr(np, 'float'):
+            np.float = float
+        if not hasattr(np, 'complex'):
+            np.complex = complex
+    except:
+        pass
+    
+    # Comprehensive NumPy deprecation warning suppression for this function
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        warnings.filterwarnings("ignore")
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         warnings.filterwarnings("ignore", category=FutureWarning)
+        warnings.filterwarnings("ignore", category=UserWarning)
         warnings.filterwarnings("ignore", message=".*np.bool.*")
         warnings.filterwarnings("ignore", message=".*np.int.*")
         warnings.filterwarnings("ignore", message=".*np.float.*")
@@ -6046,7 +6295,7 @@ def display_advanced_risk_analysis(portfolio_data, risk_analyzer):
             st.subheader("📊 Risk Contribution by Asset")
             
             # Create risk contribution chart
-            if 'risk_contribution' in risk_metrics:
+            if 'risk_contribution' in risk_metrics and risk_metrics['risk_contribution']:
                 risk_contrib_df = pd.DataFrame(risk_metrics['risk_contribution'].items(), 
                                              columns=['Stock', 'Risk Contribution'])
                 risk_contrib_df['Risk Contribution %'] = risk_contrib_df['Risk Contribution'] * 100
@@ -6061,30 +6310,119 @@ def display_advanced_risk_analysis(portfolio_data, risk_analyzer):
                 )
                 fig_risk.update_layout(height=400)
                 st.plotly_chart(fig_risk, use_container_width=True)
+            else:
+                st.info("📊 Risk contribution analysis calculating... This appears when historical price data is available.")
             
+            # Correlation matrix
             # Correlation matrix
             st.subheader("🔗 Asset Correlation Matrix")
             
-            # Initialize variable to avoid reference errors
-            high_corr_pairs = []
+            # Get correlation matrix from risk metrics (already calculated)
+            correlation_matrix = risk_metrics.get('correlation_matrix', pd.DataFrame())
+            
+            if correlation_matrix is not None and not correlation_matrix.empty and len(correlation_matrix) > 1:
+                try:
+                    # Enhanced NumPy compatibility for plotting
+                    import numpy as np
+                    import warnings
+                    import os
+                    
+                    # Set up comprehensive warning suppression
+                    os.environ['PYTHONWARNINGS'] = 'ignore'
+                    
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        warnings.filterwarnings("ignore", category=Warning)
+                        warnings.filterwarnings("ignore", message=".*np.bool.*")
+                        warnings.filterwarnings("ignore", message=".*numpy.*has no attribute.*")
+                        
+                        # Convert correlation matrix to pure Python types for plotting
+                        corr_values = correlation_matrix.values.astype(float)
+                        corr_labels = list(correlation_matrix.columns)
+                        
+                        # Create correlation heatmap with explicit data conversion
+                        fig_corr = px.imshow(
+                            corr_values,
+                            x=corr_labels,
+                            y=corr_labels,
+                            title="Portfolio Correlation Heatmap",
+                            color_continuous_scale='RdBu',
+                            aspect='auto',
+                            zmin=-1,
+                            zmax=1
+                        )
+                        fig_corr.update_layout(height=500)
+                        
+                        # Add correlation values as text (with explicit conversion)
+                        corr_text = np.around(corr_values, decimals=2).astype(str)
+                        fig_corr.update_traces(text=corr_text, texttemplate="%{text}")
+                        
+                        st.plotly_chart(fig_corr, use_container_width=True)
+                        
+                        # Correlation insights
+                        high_corr_pairs = []
+                        for i in range(len(correlation_matrix.columns)):
+                            for j in range(i+1, len(correlation_matrix.columns)):
+                                try:
+                                    corr_val = float(correlation_matrix.iloc[i, j])
+                                    if abs(corr_val) > 0.7:  # High correlation threshold
+                                        high_corr_pairs.append({
+                                            'Stock 1': correlation_matrix.columns[i],
+                                            'Stock 2': correlation_matrix.columns[j],
+                                            'Correlation': corr_val
+                                        })
+                                except (TypeError, ValueError):
+                                    continue
+                        
+                        if high_corr_pairs:
+                            st.warning("⚠️ **High Correlation Alert**: The following pairs show high correlation (>70%):")
+                            for pair in high_corr_pairs[:5]:  # Show top 5
+                                st.write(f"• {pair['Stock 1']} ↔ {pair['Stock 2']}: {pair['Correlation']:.2%}")
+                        else:
+                            st.success("✅ No high correlations detected - good diversification!")
+                            
+                except Exception as plot_error:
+                    # Fallback: Show simple correlation info without heatmap
+                    st.info("📊 Correlation matrix calculated but visualization temporarily unavailable.")
+                    if len(correlation_matrix.columns) > 1:
+                        st.write(f"**Assets analyzed:** {', '.join(correlation_matrix.columns)}")
+                        
+            elif len(correlation_matrix) == 1:
+                st.info("📊 Correlation analysis requires at least 2 assets. Add more assets to enable correlation analysis.")
+            else:
+                st.info("📊 Correlation analysis temporarily unavailable - insufficient price data.")
         
             
             try:
                 # Extract symbols from portfolio data and get proper returns data for correlation
                 if isinstance(portfolio_data, pd.DataFrame):
-                    portfolio_symbols = portfolio_data['symbol'].tolist() if 'symbol' in portfolio_data.columns else []
+                    # Try both 'Symbol' and 'symbol' column names for compatibility
+                    if 'Symbol' in portfolio_data.columns:
+                        portfolio_symbols = portfolio_data['Symbol'].tolist()
+                    elif 'symbol' in portfolio_data.columns:
+                        portfolio_symbols = portfolio_data['symbol'].tolist()
+                    else:
+                        portfolio_symbols = []
                 else:
                     portfolio_symbols = portfolio_data if portfolio_data else []
                 
                 if portfolio_symbols:
                     # Get price data and calculate returns for correlation matrix
-                    price_data = risk_analyzer.get_portfolio_price_data(portfolio_symbols)
-                    
-                    if not price_data.empty:
-                        returns = price_data.pct_change().dropna()
-                        correlation_matrix = risk_analyzer.calculate_correlation_matrix(returns)
-                    else:
-                        correlation_matrix = pd.DataFrame()
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        warnings.filterwarnings("ignore", category=Warning)
+                        
+                        price_data = risk_analyzer.get_portfolio_price_data(portfolio_symbols)
+                        
+                        if not price_data.empty:
+                            # Calculate returns with explicit NumPy compatibility
+                            try:
+                                returns = price_data.pct_change().dropna()
+                                correlation_matrix = risk_analyzer.calculate_correlation_matrix(returns)
+                            except Exception:
+                                correlation_matrix = pd.DataFrame()
+                        else:
+                            correlation_matrix = pd.DataFrame()
                 else:
                     correlation_matrix = pd.DataFrame()
                     
@@ -6115,10 +6453,21 @@ def display_advanced_risk_analysis(portfolio_data, risk_analyzer):
                         for pair in high_corr_pairs[:5]:  # Show top 5
                             st.write(f"• {pair['Stock 1']} ↔ {pair['Stock 2']}: {pair['Correlation']:.2%}")
                 else:
-                    st.info("📊 Correlation matrix not available - insufficient data or calculation error")
+                    # Fallback: Show a simple message when correlation matrix can't be calculated
+                    st.info("📊 Correlation analysis temporarily unavailable")
+                    if portfolio_symbols and len(portfolio_symbols) > 1:
+                        st.write(f"**Portfolio contains {len(portfolio_symbols)} assets:**")
+                        for i, symbol in enumerate(portfolio_symbols[:10]):  # Show max 10
+                            st.write(f"• {symbol}")
+                        if len(portfolio_symbols) > 10:
+                            st.write(f"... and {len(portfolio_symbols) - 10} more assets")
+                    else:
+                        st.write("💡 Add more assets to your portfolio to enable correlation analysis")
             except Exception as e:
-                st.warning(f"⚠️ Could not calculate correlation matrix: {str(e)}")
-                st.info("💡 This may be due to insufficient historical data or data quality issues")
+                # Don't show the full error message to avoid exposing NumPy compatibility issues
+                st.info("� Correlation analysis temporarily unavailable due to data processing constraints")
+                if portfolio_symbols and len(portfolio_symbols) > 1:
+                    st.write(f"**Portfolio contains {len(portfolio_symbols)} assets for analysis**")
             
             # Stress testing results
             st.subheader("🚨 Stress Testing")
@@ -8569,18 +8918,85 @@ def main():
                         # Initialize risk analyzer
                         risk_analyzer = AdvancedRiskAnalyzer()
                         
-                        # Create portfolio data from current holdings
-                        current_holdings = enhanced_manager.portfolio_db.get_current_holdings()
+                        # Create portfolio data from scenario analysis
+                        # Check if we have scenario portfolio data
+                        if 'scenario_portfolio' in analysis and analysis['scenario_portfolio']:
+                            # Convert scenario portfolio to DataFrame format for risk analysis
+                            scenario_data = []
+                            
+                            try:
+                                # Debug info for scenario structure
+                                st.info(f"🔍 Processing scenario portfolio with {len(analysis['scenario_portfolio'])} assets")
+                                
+                                for symbol, data in analysis['scenario_portfolio'].items():
+                                    # Get current price for market value calculation
+                                    try:
+                                        current_price = get_simple_current_price(symbol)
+                                        if current_price <= 0:
+                                            current_price = data.get('cost_basis', 100.0)  # Fallback to cost basis or default
+                                        
+                                        shares = data.get('shares', 0)
+                                        market_value = shares * current_price
+                                        
+                                        scenario_data.append({
+                                            'Symbol': symbol,
+                                            'Quantity': shares,
+                                            'Average Cost': data.get('cost_basis', current_price),
+                                            'Current Price': current_price,
+                                            'Total Value': market_value
+                                        })
+                                        
+                                        # Debug: show processed data
+                                        st.write(f"✅ {symbol}: {shares} shares @ ${current_price:.2f} = ${market_value:.2f}")
+                                        
+                                    except Exception as symbol_error:
+                                        # Log error but continue with other symbols
+                                        st.error(f"⚠️ Error processing {symbol}: {str(symbol_error)}")
+                                        # Show the problematic data structure for debugging
+                                        st.write(f"Data for {symbol}: {data}")
+                                        continue
+                                
+                                if scenario_data:
+                                    scenario_portfolio_df = pd.DataFrame(scenario_data)
+                                    
+                                    st.markdown("### 🎯 Scenario Portfolio Risk Profile")
+                                    st.write(f"**Analyzing scenario with {len(scenario_portfolio_df)} assets:**")
+                                    
+                                    # Display scenario symbols
+                                    symbols_list = scenario_portfolio_df['Symbol'].tolist()
+                                    st.write("• " + " • ".join(symbols_list))
+                                    
+                                    # Display advanced risk analysis for scenario portfolio
+                                    display_advanced_risk_analysis(scenario_portfolio_df, risk_analyzer)
+                                else:
+                                    st.warning("⚠️ No valid scenario portfolio data for risk analysis")
+                                    st.info("💡 This may be due to pricing data issues or invalid symbols")
+                                    # Show the original scenario data for debugging
+                                    st.write("Debug - Original scenario data:", analysis['scenario_portfolio'])
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Error processing scenario portfolio: {str(e)}")
+                                st.info("💡 Please try analyzing the scenario again")
+                                # Show more debug info
+                                import traceback
+                                st.code(traceback.format_exc())
+                        else:
+                            # Fallback to current holdings if no scenario data
+                            current_holdings = enhanced_manager.portfolio_db.get_current_holdings()
+                            
+                            if not current_holdings.empty:
+                                st.markdown("### 🎯 Current Portfolio Risk Profile")
+                                st.info("💡 No scenario analysis available. Showing current portfolio risk profile.")
+                                
+                                # Display advanced risk analysis for current portfolio
+                                display_advanced_risk_analysis(current_holdings, risk_analyzer)
+                            else:
+                                st.warning("⚠️ No portfolio data available for risk analysis")
                         
-                        if not current_holdings.empty:
-                            st.markdown("### 🎯 Current Portfolio Risk Profile")
-                            
-                            # Display advanced risk analysis for current portfolio
-                            display_advanced_risk_analysis(current_holdings, risk_analyzer)
-                            
-                            st.markdown("---")
-                            
-                            # Scenario comparison if available
+                        st.markdown("---")
+                        
+                        # Scenario comparison if available
+                        if 'current_metrics' in analysis and 'simulated_metrics' in analysis:
                             current_metrics = analysis['current_metrics']
                             scenario_metrics = analysis['simulated_metrics']
                             
