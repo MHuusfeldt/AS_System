@@ -816,31 +816,95 @@ class PortfolioCloudManager:
     def __init__(self):
         self.backup_format_version = "1.0"
         self.supported_formats = ["json", "csv", "xlsx"]
+    
+    def _get_portfolio_data_from_all_sources(self):
+        """Get portfolio data from all available sources (session state + enhanced database)"""
+        portfolio_data = {
+            'session_state': {
+                'portfolio': st.session_state.get("portfolio", []),
+                'portfolio_holdings': st.session_state.get("portfolio_holdings", {})
+            },
+            'enhanced_portfolio': {
+                'holdings': [],
+                'transactions': []
+            }
+        }
+        
+        # Get enhanced portfolio data if available
+        if (st.session_state.get('enhanced_features_enabled', False) and 
+            st.session_state.get('enhanced_features_manager') and
+            st.session_state.enhanced_features_manager.portfolio_db):
+            
+            try:
+                enhanced_manager = st.session_state.enhanced_features_manager
+                
+                # Get current holdings from database
+                holdings_df = enhanced_manager.portfolio_db.get_current_holdings()
+                if not holdings_df.empty:
+                    portfolio_data['enhanced_portfolio']['holdings'] = holdings_df.to_dict('records')
+                
+                # Get transaction history
+                transactions_df = enhanced_manager.portfolio_db.get_transaction_history()
+                if not transactions_df.empty:
+                    portfolio_data['enhanced_portfolio']['transactions'] = transactions_df.to_dict('records')
+                    
+            except Exception as e:
+                st.warning(f"Could not access enhanced portfolio data: {e}")
+        
+        return portfolio_data
+    
+    def _count_unique_symbols(self, all_portfolio_data):
+        """Count unique symbols across all portfolio sources"""
+        unique_symbols = set()
+        
+        # Add from session state
+        unique_symbols.update(all_portfolio_data['session_state']['portfolio'])
+        unique_symbols.update(all_portfolio_data['session_state']['portfolio_holdings'].keys())
+        
+        # Add from enhanced portfolio
+        for holding in all_portfolio_data['enhanced_portfolio']['holdings']:
+            unique_symbols.add(holding.get('symbol', ''))
+        
+        return len(unique_symbols)
         
     def create_portfolio_backup(self):
         """Create comprehensive portfolio backup with all session data"""
         try:
+            # Get all portfolio data
+            all_portfolio_data = self._get_portfolio_data_from_all_sources()
+            
+            # Count total portfolio items
+            session_count = len(all_portfolio_data['session_state']['portfolio'])
+            enhanced_count = len(all_portfolio_data['enhanced_portfolio']['holdings'])
+            total_holdings = session_count + enhanced_count
+            
             backup_data = {
                 "metadata": {
                     "version": self.backup_format_version,
                     "created": datetime.now().isoformat(),
                     "app_version": "AS_System_v6",
-                    "data_types": ["portfolio", "holdings", "analysis_history", "weights"]
+                    "data_types": ["portfolio", "holdings", "analysis_history", "weights", "enhanced_portfolio"],
+                    "portfolio_sources": {
+                        "session_state_count": session_count,
+                        "enhanced_portfolio_count": enhanced_count,
+                        "total_holdings": total_holdings
+                    }
                 },
                 "portfolio": {
-                    "symbols": st.session_state.get("portfolio", []),
-                    "holdings": st.session_state.get("portfolio_holdings", {}),
+                    "session_state": all_portfolio_data['session_state'],
+                    "enhanced_portfolio": all_portfolio_data['enhanced_portfolio'],
                     "total_value": self._calculate_portfolio_value(),
                     "last_updated": datetime.now().isoformat()
                 },
                 "analysis_history": st.session_state.get("analysis_history", []),
                 "user_settings": {
                     "score_weights": st.session_state.get("score_weights", {}),
-                    "selected_symbols": st.session_state.get("selected_symbols", [])
+                    "selected_symbols": st.session_state.get("selected_symbols", []),
+                    "enhanced_features_enabled": st.session_state.get("enhanced_features_enabled", False)
                 },
                 "statistics": {
                     "total_analyses": len(st.session_state.get("analysis_history", [])),
-                    "unique_symbols": len(set(st.session_state.get("portfolio", []))),
+                    "unique_symbols": self._count_unique_symbols(all_portfolio_data),
                     "backup_size_estimate": "calculated_in_kb"
                 }
             }
@@ -859,7 +923,7 @@ class PortfolioCloudManager:
         """Generate downloadable backup file in specified format"""
         backup_data = self.create_portfolio_backup()
         if not backup_data:
-            return None, None
+            return None, None, None
             
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
@@ -869,18 +933,38 @@ class PortfolioCloudManager:
             mime_type = "application/json"
             
         elif format_type == "csv":
-            # Create CSV format for portfolio data
-            portfolio_df = pd.DataFrame([
-                {
+            # Create CSV format combining all portfolio sources
+            all_data = self._get_portfolio_data_from_all_sources()
+            portfolio_df_data = []
+            
+            # Add session state holdings
+            for symbol, holdings in all_data['session_state']['portfolio_holdings'].items():
+                portfolio_df_data.append({
                     "Symbol": symbol,
+                    "Source": "Session_State",
                     "Quantity": holdings.get("quantity", 0),
                     "Purchase_Price": holdings.get("purchase_price", 0),
                     "Purchase_Date": holdings.get("purchase_date", ""),
                     "Current_Value": self._get_current_value(symbol, holdings.get("quantity", 0))
-                }
-                for symbol, holdings in backup_data["portfolio"]["holdings"].items()
-            ])
-            content = portfolio_df.to_csv(index=False)
+                })
+            
+            # Add enhanced portfolio holdings
+            for holding in all_data['enhanced_portfolio']['holdings']:
+                portfolio_df_data.append({
+                    "Symbol": holding.get('symbol', ''),
+                    "Source": "Enhanced_Portfolio",
+                    "Quantity": holding.get('quantity', 0),
+                    "Purchase_Price": holding.get('average_cost', 0),
+                    "Purchase_Date": holding.get('date_added', ''),
+                    "Current_Value": self._get_current_value(holding.get('symbol', ''), holding.get('quantity', 0))
+                })
+            
+            if portfolio_df_data:
+                portfolio_df = pd.DataFrame(portfolio_df_data)
+                content = portfolio_df.to_csv(index=False)
+            else:
+                content = "Symbol,Source,Quantity,Purchase_Price,Purchase_Date,Current_Value\n"
+            
             filename = f"AS_System_portfolio_{timestamp}.csv"
             mime_type = "text/csv"
             
@@ -888,17 +972,33 @@ class PortfolioCloudManager:
             # Create Excel format with multiple sheets
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                # Portfolio sheet
-                portfolio_df = pd.DataFrame([
-                    {
-                        "Symbol": symbol,
-                        "Quantity": holdings.get("quantity", 0),
-                        "Purchase_Price": holdings.get("purchase_price", 0),
-                        "Purchase_Date": holdings.get("purchase_date", ""),
-                    }
-                    for symbol, holdings in backup_data["portfolio"]["holdings"].items()
-                ])
-                portfolio_df.to_excel(writer, sheet_name='Portfolio', index=False)
+                # Session state portfolio sheet
+                session_holdings = backup_data["portfolio"]["session_state"]["portfolio_holdings"]
+                if session_holdings:
+                    session_df = pd.DataFrame([
+                        {
+                            "Symbol": symbol,
+                            "Quantity": holdings.get("quantity", 0),
+                            "Purchase_Price": holdings.get("purchase_price", 0),
+                            "Purchase_Date": holdings.get("purchase_date", ""),
+                        }
+                        for symbol, holdings in session_holdings.items()
+                    ])
+                    session_df.to_excel(writer, sheet_name='Session_State', index=False)
+                
+                # Enhanced portfolio sheet
+                enhanced_holdings = backup_data["portfolio"]["enhanced_portfolio"]["holdings"]
+                if enhanced_holdings:
+                    enhanced_df = pd.DataFrame([
+                        {
+                            "Symbol": holding.get('symbol', ''),
+                            "Quantity": holding.get('quantity', 0),
+                            "Average_Cost": holding.get('average_cost', 0),
+                            "Date_Added": holding.get('date_added', ''),
+                        }
+                        for holding in enhanced_holdings
+                    ])
+                    enhanced_df.to_excel(writer, sheet_name='Enhanced_Portfolio', index=False)
                 
                 # Settings sheet
                 settings_df = pd.DataFrame([
@@ -944,23 +1044,62 @@ class PortfolioCloudManager:
                 st.error("❌ Invalid backup format")
                 return False
             
-            # Restore portfolio data
-            if "portfolio" in backup_data:
-                st.session_state.portfolio = backup_data["portfolio"].get("symbols", [])
-                st.session_state.portfolio_holdings = backup_data["portfolio"].get("holdings", {})
+            restored_items = 0
+            
+            # Restore session state portfolio data
+            if "portfolio" in backup_data and "session_state" in backup_data["portfolio"]:
+                session_data = backup_data["portfolio"]["session_state"]
+                
+                if session_data.get("portfolio"):
+                    st.session_state.portfolio = session_data["portfolio"]
+                    restored_items += len(session_data["portfolio"])
+                
+                if session_data.get("portfolio_holdings"):
+                    st.session_state.portfolio_holdings = session_data["portfolio_holdings"]
+            
+            # Restore enhanced portfolio data if enhanced features are enabled
+            if (st.session_state.get('enhanced_features_enabled', False) and 
+                st.session_state.get('enhanced_features_manager') and
+                "enhanced_portfolio" in backup_data["portfolio"]):
+                
+                enhanced_data = backup_data["portfolio"]["enhanced_portfolio"]
+                enhanced_manager = st.session_state.enhanced_features_manager
+                
+                if enhanced_data.get("holdings") and enhanced_manager.portfolio_db:
+                    try:
+                        # Clear existing holdings
+                        enhanced_manager.portfolio_db.clear_all_holdings()
+                        
+                        # Restore holdings
+                        for holding in enhanced_data["holdings"]:
+                            symbol = holding.get('symbol', '')
+                            quantity = holding.get('quantity', 0)
+                            avg_cost = holding.get('average_cost', 0)
+                            
+                            if symbol and quantity > 0:
+                                enhanced_manager.portfolio_db.add_holding(symbol, quantity, avg_cost)
+                                restored_items += 1
+                        
+                        st.info(f"✅ Restored {len(enhanced_data['holdings'])} enhanced portfolio holdings")
+                        
+                    except Exception as e:
+                        st.warning(f"⚠️ Could not restore enhanced portfolio: {e}")
             
             # Restore user settings
             if "user_settings" in backup_data:
-                if "score_weights" in backup_data["user_settings"]:
-                    st.session_state.score_weights = backup_data["user_settings"]["score_weights"]
-                if "selected_symbols" in backup_data["user_settings"]:
-                    st.session_state.selected_symbols = backup_data["user_settings"]["selected_symbols"]
+                user_settings = backup_data["user_settings"]
+                
+                if user_settings.get("score_weights"):
+                    st.session_state.score_weights = user_settings["score_weights"]
+                
+                if user_settings.get("selected_symbols"):
+                    st.session_state.selected_symbols = user_settings["selected_symbols"]
             
             # Restore analysis history (optional)
             if "analysis_history" in backup_data:
                 st.session_state.analysis_history = backup_data["analysis_history"]
             
-            st.success("✅ Portfolio successfully restored from JSON backup!")
+            st.success(f"✅ Portfolio successfully restored from JSON backup! ({restored_items} items)")
             return True
             
         except Exception as e:
@@ -1036,16 +1175,39 @@ class PortfolioCloudManager:
             return False
     
     def _calculate_portfolio_value(self):
-        """Calculate total portfolio value"""
+        """Calculate total portfolio value from all sources"""
         total_value = 0.0
+        
         try:
-            for symbol, holdings in st.session_state.get("portfolio_holdings", {}).items():
-                quantity = holdings.get("quantity", 0)
-                current_price = get_simple_current_price(symbol)
-                if current_price and current_price > 0:
-                    total_value += quantity * current_price
-        except Exception:
-            pass
+            # Get data from all sources
+            all_data = self._get_portfolio_data_from_all_sources()
+            
+            # Calculate from session state holdings
+            session_holdings = all_data['session_state']['portfolio_holdings']
+            for symbol, holdings in session_holdings.items():
+                try:
+                    quantity = holdings.get('quantity', 0)
+                    current_price = get_simple_current_price(symbol)
+                    if current_price and current_price > 0:
+                        total_value += quantity * current_price
+                except Exception:
+                    continue
+            
+            # Calculate from enhanced portfolio holdings
+            enhanced_holdings = all_data['enhanced_portfolio']['holdings']
+            for holding in enhanced_holdings:
+                try:
+                    symbol = holding.get('symbol', '')
+                    quantity = holding.get('quantity', 0)
+                    current_price = get_simple_current_price(symbol)
+                    if current_price and current_price > 0:
+                        total_value += quantity * current_price
+                except Exception:
+                    continue
+                    
+        except Exception as e:
+            st.warning(f"Error calculating portfolio value: {e}")
+        
         return total_value
     
     def _get_current_value(self, symbol, quantity):
@@ -1094,18 +1256,33 @@ class PortfolioCloudManager:
         """Display backup and restore interface"""
         st.subheader("💾 Portfolio Backup & Restore")
         
+        # Get portfolio data from all sources
+        all_data = self._get_portfolio_data_from_all_sources()
+        
         # Display current portfolio status
-        portfolio_count = len(st.session_state.get("portfolio", []))
-        holdings_count = len(st.session_state.get("portfolio_holdings", {}))
+        session_count = len(all_data['session_state']['portfolio'])
+        session_holdings_count = len(all_data['session_state']['portfolio_holdings'])
+        enhanced_count = len(all_data['enhanced_portfolio']['holdings'])
+        
+        total_portfolio_count = session_count + enhanced_count
+        total_holdings_tracked = session_holdings_count + enhanced_count
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Portfolio Stocks", portfolio_count)
+            st.metric("Portfolio Stocks", total_portfolio_count)
         with col2:
-            st.metric("Holdings Tracked", holdings_count)
+            st.metric("Holdings Tracked", total_holdings_tracked)
         with col3:
             portfolio_value = self._calculate_portfolio_value()
             st.metric("Estimated Value", f"${portfolio_value:,.2f}" if portfolio_value > 0 else "N/A")
+        
+        # Show data source breakdown
+        if total_portfolio_count > 0:
+            st.markdown("**📊 Data Sources:**")
+            if session_count > 0:
+                st.write(f"• Session State: {session_count} stocks")
+            if enhanced_count > 0:
+                st.write(f"• Enhanced Portfolio: {enhanced_count} holdings")
         
         # Backup section
         st.markdown("### 📥 Create Backup")
@@ -1129,20 +1306,20 @@ class PortfolioCloudManager:
         if st.button("📥 Generate Backup", type="primary"):
             with st.spinner("Creating backup..."):
                 content, filename, mime_type = self.generate_downloadable_backup(backup_format)
-                
                 if content:
                     st.download_button(
-                        label=f"⬇️ Download {filename}",
+                        f"📥 Download {backup_format.upper()} Backup",
                         data=content,
                         file_name=filename,
-                        mime=mime_type,
-                        help="Click to download your portfolio backup"
+                        mime=mime_type
                     )
-                    st.success(f"✅ Backup created successfully! Format: {backup_format.upper()}")
+                    # Update last backup timestamp
+                    st.session_state.last_backup_time = datetime.now().isoformat()
+                    st.success(f"✅ Backup created successfully!")
                 else:
                     st.error("❌ Failed to create backup")
         
-        # Restore section
+        # Restore section  
         st.markdown("### 📤 Restore from Backup")
         
         uploaded_file = st.file_uploader(
@@ -1158,14 +1335,49 @@ class PortfolioCloudManager:
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("🔄 Restore Portfolio", type="primary"):
-                    if self.restore_from_backup(uploaded_file):
+                if st.button("� Restore Portfolio", type="primary", key="restore_portfolio_btn"):
+                    success = self.restore_from_backup(uploaded_file)
+                    if success:
                         st.balloons()
-                        st.info("Portfolio restored! Refresh the page to see changes.")
+                        time.sleep(1)
+                        st.rerun()
             
             with col2:
-                if st.button("❌ Cancel"):
+                if st.button("❌ Cancel", key="cancel_restore_btn"):
                     st.rerun()
+        
+        # Automatic backup reminder
+        st.markdown("### 🔔 Backup Reminders")
+        
+        # Initialize session state for auto backup
+        if 'auto_backup_enabled' not in st.session_state:
+            st.session_state.auto_backup_enabled = False
+        if 'last_backup_reminder' not in st.session_state:
+            st.session_state.last_backup_reminder = None
+        
+        def update_auto_backup():
+            st.session_state.auto_backup_enabled = st.session_state.auto_backup_checkbox
+        
+        auto_backup = st.checkbox(
+            "Enable automatic backup reminders (every 24 hours)",
+            value=st.session_state.auto_backup_enabled,
+            key="auto_backup_checkbox",
+            on_change=update_auto_backup
+        )
+        
+        if auto_backup:
+            last_reminder = st.session_state.get("last_backup_reminder")
+            if last_reminder:
+                last_time = datetime.fromisoformat(last_reminder)
+                time_since = datetime.now() - last_time
+                
+                if time_since.total_seconds() > 86400:  # 24 hours
+                    st.info("🔔 Reminder: It's been 24+ hours since your last backup reminder. Consider creating a backup!")
+                    if st.button("📥 Create Backup Now"):
+                        st.session_state.last_backup_reminder = datetime.now().isoformat()
+                        self.display_backup_interface()
+            else:
+                st.session_state.last_backup_reminder = datetime.now().isoformat()
         
         # Automatic backup reminder
         st.markdown("### 🔔 Backup Reminders")
