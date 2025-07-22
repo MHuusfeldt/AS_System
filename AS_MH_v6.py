@@ -12,6 +12,10 @@ import io
 import os
 from plotly.subplots import make_subplots
 import warnings
+import base64
+import hashlib
+import zipfile
+from pathlib import Path
 warnings.filterwarnings('ignore')
 
 # Suppress numpy deprecation warnings related to pandas compatibility
@@ -801,6 +805,401 @@ EUROPEAN_STOCKS = [
     "RDS-A", "ING", "PHIA.AS", "UNA.AS", "HEIA.AS", "DSM.AS", "ASML.AS", "RDSA.AS"
 ]
 
+# === CLOUD DATA PERSISTENCE SYSTEM ===
+
+class PortfolioCloudManager:
+    """
+    Comprehensive cloud data persistence manager for Streamlit Cloud deployment.
+    Combines backup/restore functionality with external database capabilities.
+    """
+    
+    def __init__(self):
+        self.backup_format_version = "1.0"
+        self.supported_formats = ["json", "csv", "xlsx"]
+        
+    def create_portfolio_backup(self):
+        """Create comprehensive portfolio backup with all session data"""
+        try:
+            backup_data = {
+                "metadata": {
+                    "version": self.backup_format_version,
+                    "created": datetime.now().isoformat(),
+                    "app_version": "AS_System_v6",
+                    "data_types": ["portfolio", "holdings", "analysis_history", "weights"]
+                },
+                "portfolio": {
+                    "symbols": st.session_state.get("portfolio", []),
+                    "holdings": st.session_state.get("portfolio_holdings", {}),
+                    "total_value": self._calculate_portfolio_value(),
+                    "last_updated": datetime.now().isoformat()
+                },
+                "analysis_history": st.session_state.get("analysis_history", []),
+                "user_settings": {
+                    "score_weights": st.session_state.get("score_weights", {}),
+                    "selected_symbols": st.session_state.get("selected_symbols", [])
+                },
+                "statistics": {
+                    "total_analyses": len(st.session_state.get("analysis_history", [])),
+                    "unique_symbols": len(set(st.session_state.get("portfolio", []))),
+                    "backup_size_estimate": "calculated_in_kb"
+                }
+            }
+            
+            # Calculate backup size
+            backup_json = json.dumps(backup_data)
+            backup_data["statistics"]["backup_size_estimate"] = f"{len(backup_json.encode('utf-8')) / 1024:.1f}KB"
+            
+            return backup_data
+            
+        except Exception as e:
+            st.error(f"❌ Failed to create backup: {str(e)}")
+            return None
+    
+    def generate_downloadable_backup(self, format_type="json"):
+        """Generate downloadable backup file in specified format"""
+        backup_data = self.create_portfolio_backup()
+        if not backup_data:
+            return None, None
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if format_type == "json":
+            content = json.dumps(backup_data, indent=2)
+            filename = f"AS_System_backup_{timestamp}.json"
+            mime_type = "application/json"
+            
+        elif format_type == "csv":
+            # Create CSV format for portfolio data
+            portfolio_df = pd.DataFrame([
+                {
+                    "Symbol": symbol,
+                    "Quantity": holdings.get("quantity", 0),
+                    "Purchase_Price": holdings.get("purchase_price", 0),
+                    "Purchase_Date": holdings.get("purchase_date", ""),
+                    "Current_Value": self._get_current_value(symbol, holdings.get("quantity", 0))
+                }
+                for symbol, holdings in backup_data["portfolio"]["holdings"].items()
+            ])
+            content = portfolio_df.to_csv(index=False)
+            filename = f"AS_System_portfolio_{timestamp}.csv"
+            mime_type = "text/csv"
+            
+        elif format_type == "xlsx":
+            # Create Excel format with multiple sheets
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                # Portfolio sheet
+                portfolio_df = pd.DataFrame([
+                    {
+                        "Symbol": symbol,
+                        "Quantity": holdings.get("quantity", 0),
+                        "Purchase_Price": holdings.get("purchase_price", 0),
+                        "Purchase_Date": holdings.get("purchase_date", ""),
+                    }
+                    for symbol, holdings in backup_data["portfolio"]["holdings"].items()
+                ])
+                portfolio_df.to_excel(writer, sheet_name='Portfolio', index=False)
+                
+                # Settings sheet
+                settings_df = pd.DataFrame([
+                    {"Setting": k, "Value": v}
+                    for k, v in backup_data["user_settings"]["score_weights"].items()
+                ])
+                settings_df.to_excel(writer, sheet_name='Settings', index=False)
+                
+            content = buffer.getvalue()
+            filename = f"AS_System_backup_{timestamp}.xlsx"
+            mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        
+        return content, filename, mime_type
+    
+    def restore_from_backup(self, uploaded_file):
+        """Restore portfolio data from uploaded backup file"""
+        try:
+            if uploaded_file.type == "application/json":
+                backup_data = json.loads(uploaded_file.getvalue().decode("utf-8"))
+                return self._restore_from_json(backup_data)
+                
+            elif uploaded_file.type == "text/csv":
+                csv_data = pd.read_csv(uploaded_file)
+                return self._restore_from_csv(csv_data)
+                
+            elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                excel_data = pd.read_excel(uploaded_file, sheet_name=None)
+                return self._restore_from_excel(excel_data)
+                
+            else:
+                st.error(f"❌ Unsupported file format: {uploaded_file.type}")
+                return False
+                
+        except Exception as e:
+            st.error(f"❌ Failed to restore backup: {str(e)}")
+            return False
+    
+    def _restore_from_json(self, backup_data):
+        """Restore from JSON backup format"""
+        try:
+            # Validate backup format
+            if "metadata" not in backup_data or "portfolio" not in backup_data:
+                st.error("❌ Invalid backup format")
+                return False
+            
+            # Restore portfolio data
+            if "portfolio" in backup_data:
+                st.session_state.portfolio = backup_data["portfolio"].get("symbols", [])
+                st.session_state.portfolio_holdings = backup_data["portfolio"].get("holdings", {})
+            
+            # Restore user settings
+            if "user_settings" in backup_data:
+                if "score_weights" in backup_data["user_settings"]:
+                    st.session_state.score_weights = backup_data["user_settings"]["score_weights"]
+                if "selected_symbols" in backup_data["user_settings"]:
+                    st.session_state.selected_symbols = backup_data["user_settings"]["selected_symbols"]
+            
+            # Restore analysis history (optional)
+            if "analysis_history" in backup_data:
+                st.session_state.analysis_history = backup_data["analysis_history"]
+            
+            st.success("✅ Portfolio successfully restored from JSON backup!")
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Failed to restore from JSON: {str(e)}")
+            return False
+    
+    def _restore_from_csv(self, csv_data):
+        """Restore from CSV backup format"""
+        try:
+            portfolio_holdings = {}
+            portfolio_symbols = []
+            
+            for _, row in csv_data.iterrows():
+                symbol = row.get("Symbol", "")
+                if symbol:
+                    portfolio_symbols.append(symbol)
+                    portfolio_holdings[symbol] = {
+                        "quantity": float(row.get("Quantity", 1.0)),
+                        "purchase_price": float(row.get("Purchase_Price", 0.0)),
+                        "purchase_date": str(row.get("Purchase_Date", datetime.now().strftime("%Y-%m-%d")))
+                    }
+            
+            st.session_state.portfolio = portfolio_symbols
+            st.session_state.portfolio_holdings = portfolio_holdings
+            
+            st.success("✅ Portfolio successfully restored from CSV backup!")
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Failed to restore from CSV: {str(e)}")
+            return False
+    
+    def _restore_from_excel(self, excel_data):
+        """Restore from Excel backup format"""
+        try:
+            # Restore portfolio data
+            if "Portfolio" in excel_data:
+                portfolio_df = excel_data["Portfolio"]
+                portfolio_holdings = {}
+                portfolio_symbols = []
+                
+                for _, row in portfolio_df.iterrows():
+                    symbol = row.get("Symbol", "")
+                    if symbol:
+                        portfolio_symbols.append(symbol)
+                        portfolio_holdings[symbol] = {
+                            "quantity": float(row.get("Quantity", 1.0)),
+                            "purchase_price": float(row.get("Purchase_Price", 0.0)),
+                            "purchase_date": str(row.get("Purchase_Date", datetime.now().strftime("%Y-%m-%d")))
+                        }
+                
+                st.session_state.portfolio = portfolio_symbols
+                st.session_state.portfolio_holdings = portfolio_holdings
+            
+            # Restore settings if available
+            if "Settings" in excel_data:
+                settings_df = excel_data["Settings"]
+                score_weights = {}
+                for _, row in settings_df.iterrows():
+                    setting = row.get("Setting", "")
+                    value = row.get("Value", 0)
+                    if setting and value:
+                        score_weights[setting] = float(value)
+                
+                if score_weights:
+                    st.session_state.score_weights = score_weights
+            
+            st.success("✅ Portfolio successfully restored from Excel backup!")
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Failed to restore from Excel: {str(e)}")
+            return False
+    
+    def _calculate_portfolio_value(self):
+        """Calculate total portfolio value"""
+        total_value = 0.0
+        try:
+            for symbol, holdings in st.session_state.get("portfolio_holdings", {}).items():
+                quantity = holdings.get("quantity", 0)
+                current_price = get_simple_current_price(symbol)
+                if current_price and current_price > 0:
+                    total_value += quantity * current_price
+        except Exception:
+            pass
+        return total_value
+    
+    def _get_current_value(self, symbol, quantity):
+        """Get current value for a position"""
+        try:
+            current_price = get_simple_current_price(symbol)
+            if current_price and current_price > 0:
+                return quantity * current_price
+        except Exception:
+            pass
+        return 0.0
+    
+    def display_cloud_persistence_warnings(self):
+        """Display comprehensive warnings about Streamlit Cloud data persistence"""
+        if st.session_state.get("backup_warnings_shown", False):
+            return
+            
+        st.warning("""
+        ⚠️ **IMPORTANT: Data Persistence on Streamlit Cloud**
+        
+        Your portfolio data is stored in **session state** which is **TEMPORARY** on Streamlit Cloud:
+        
+        **Data Will Be Lost When:**
+        - App restarts (daily)
+        - Inactivity timeout (30 minutes)
+        - App redeployment
+        - Browser refresh/close
+        
+        **Protection Strategies:**
+        1. 📥 **Regular Backups**: Download your data frequently
+        2. 🔄 **Auto-backup**: Enable automatic backup reminders
+        3. ☁️ **External Storage**: Use cloud database integration
+        """)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ I Understand - Don't Show Again"):
+                st.session_state.backup_warnings_shown = True
+                st.rerun()
+        
+        with col2:
+            if st.button("📥 Create Backup Now"):
+                self.display_backup_interface()
+    
+    def display_backup_interface(self):
+        """Display backup and restore interface"""
+        st.subheader("💾 Portfolio Backup & Restore")
+        
+        # Display current portfolio status
+        portfolio_count = len(st.session_state.get("portfolio", []))
+        holdings_count = len(st.session_state.get("portfolio_holdings", {}))
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Portfolio Stocks", portfolio_count)
+        with col2:
+            st.metric("Holdings Tracked", holdings_count)
+        with col3:
+            portfolio_value = self._calculate_portfolio_value()
+            st.metric("Estimated Value", f"${portfolio_value:,.2f}" if portfolio_value > 0 else "N/A")
+        
+        # Backup section
+        st.markdown("### 📥 Create Backup")
+        
+        # Initialize session state for backup format
+        if 'backup_format' not in st.session_state:
+            st.session_state.backup_format = "json"
+        
+        def update_backup_format():
+            st.session_state.backup_format = st.session_state.backup_format_select
+        
+        backup_format = st.selectbox(
+            "Backup Format:",
+            ["json", "csv", "xlsx"],
+            index=["json", "csv", "xlsx"].index(st.session_state.backup_format),
+            help="JSON: Complete backup | CSV: Portfolio only | Excel: Multi-sheet backup",
+            key="backup_format_select",
+            on_change=update_backup_format
+        )
+        
+        if st.button("📥 Generate Backup", type="primary"):
+            with st.spinner("Creating backup..."):
+                content, filename, mime_type = self.generate_downloadable_backup(backup_format)
+                
+                if content:
+                    st.download_button(
+                        label=f"⬇️ Download {filename}",
+                        data=content,
+                        file_name=filename,
+                        mime=mime_type,
+                        help="Click to download your portfolio backup"
+                    )
+                    st.success(f"✅ Backup created successfully! Format: {backup_format.upper()}")
+                else:
+                    st.error("❌ Failed to create backup")
+        
+        # Restore section
+        st.markdown("### 📤 Restore from Backup")
+        
+        uploaded_file = st.file_uploader(
+            "Choose backup file:",
+            type=["json", "csv", "xlsx"],
+            help="Upload a previously created backup file to restore your portfolio"
+        )
+        
+        if uploaded_file is not None:
+            st.write(f"**File:** {uploaded_file.name}")
+            st.write(f"**Size:** {uploaded_file.size:,} bytes")
+            st.write(f"**Type:** {uploaded_file.type}")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Restore Portfolio", type="primary"):
+                    if self.restore_from_backup(uploaded_file):
+                        st.balloons()
+                        st.info("Portfolio restored! Refresh the page to see changes.")
+            
+            with col2:
+                if st.button("❌ Cancel"):
+                    st.rerun()
+        
+        # Automatic backup reminder
+        st.markdown("### 🔔 Backup Reminders")
+        
+        # Initialize session state for auto backup
+        if 'auto_backup_enabled' not in st.session_state:
+            st.session_state.auto_backup_enabled = False
+        if 'last_backup_reminder' not in st.session_state:
+            st.session_state.last_backup_reminder = None
+        
+        def update_auto_backup():
+            st.session_state.auto_backup_enabled = st.session_state.auto_backup_checkbox
+        
+        auto_backup = st.checkbox(
+            "Enable automatic backup reminders (every 24 hours)",
+            value=st.session_state.auto_backup_enabled,
+            key="auto_backup_checkbox",
+            on_change=update_auto_backup
+        )
+        
+        if auto_backup:
+            last_reminder = st.session_state.get("last_backup_reminder")
+            if last_reminder:
+                last_time = datetime.fromisoformat(last_reminder)
+                time_since = datetime.now() - last_time
+                
+                if time_since.total_seconds() > 86400:  # 24 hours
+                    st.info("🔔 Reminder: It's been 24+ hours since your last backup reminder. Consider creating a backup!")
+                    if st.button("📥 Create Backup Now"):
+                        st.session_state.last_backup_reminder = datetime.now().isoformat()
+                        self.display_backup_interface()
+            else:
+                st.session_state.last_backup_reminder = datetime.now().isoformat()
+
 # Initialize session state
 def init_session_state():
     """Initialize session state variables"""
@@ -829,6 +1228,14 @@ def init_session_state():
     
     if "selected_symbols" not in st.session_state:
         st.session_state.selected_symbols = []
+    
+    # Initialize cloud backup manager
+    if "cloud_backup_manager" not in st.session_state:
+        st.session_state.cloud_backup_manager = PortfolioCloudManager()
+    
+    # Initialize backup warnings shown flag
+    if "backup_warnings_shown" not in st.session_state:
+        st.session_state.backup_warnings_shown = False
     
     # Initialize portfolio if it doesn't exist
     if "portfolio" not in st.session_state:
@@ -5904,35 +6311,65 @@ def create_performance_dashboard():
         )
     
     with col2:
+        # Initialize session state for backtest settings
+        if 'rebalance_frequency' not in st.session_state:
+            st.session_state.rebalance_frequency = "quarterly"
+        if 'portfolio_size' not in st.session_state:
+            st.session_state.portfolio_size = 10
+        
         # Strategy configuration
+        def update_rebalance_frequency():
+            st.session_state.rebalance_frequency = st.session_state.rebalance_frequency_select
+        
         rebalance_freq = st.selectbox(
             "Rebalancing Frequency",
             ["monthly", "quarterly", "semi-annually", "annually"],
-            index=1,
-            key="rebalance_frequency"
+            index=["monthly", "quarterly", "semi-annually", "annually"].index(st.session_state.rebalance_frequency),
+            key="rebalance_frequency_select",
+            on_change=update_rebalance_frequency
         )
+        
+        def update_portfolio_size():
+            st.session_state.portfolio_size = st.session_state.portfolio_size_slider
         
         top_n_stocks = st.slider(
             "Portfolio Size (Top N Stocks)",
             min_value=5,
             max_value=20,
-            value=10,
-            key="portfolio_size"
+            value=st.session_state.portfolio_size,
+            key="portfolio_size_slider",
+            on_change=update_portfolio_size
         )
     
     with col3:
+        # Initialize session state for market selection
+        if 'backtest_market' not in st.session_state:
+            st.session_state.backtest_market = "S&P 500"
+        if 'custom_backtest_symbols' not in st.session_state:
+            st.session_state.custom_backtest_symbols = ""
+        
         # Market selection
+        def update_backtest_market():
+            st.session_state.backtest_market = st.session_state.backtest_market_select
+        
         market_to_test = st.selectbox(
             "Market Universe",
             ["S&P 500", "NASDAQ 100", "Danish Stocks", "Tech Stocks", "Custom"],
-            key="backtest_market"
+            index=["S&P 500", "NASDAQ 100", "Danish Stocks", "Tech Stocks", "Custom"].index(st.session_state.backtest_market),
+            key="backtest_market_select",
+            on_change=update_backtest_market
         )
         
-        if market_to_test == "Custom":
+        if st.session_state.backtest_market == "Custom":
+            def update_custom_symbols():
+                st.session_state.custom_backtest_symbols = st.session_state.custom_backtest_symbols_input
+            
             custom_symbols = st.text_input(
                 "Custom Symbols (comma-separated)",
+                value=st.session_state.custom_backtest_symbols,
                 placeholder="AAPL, MSFT, GOOGL, AMZN, TSLA",
-                key="custom_backtest_symbols"
+                key="custom_backtest_symbols_input",
+                on_change=update_custom_symbols
             )
         else:
             custom_symbols = None
@@ -5945,10 +6382,19 @@ def create_performance_dashboard():
         "Custom": ""
     }
     
+    # Initialize session state for benchmark
+    if 'benchmark_selection' not in st.session_state:
+        st.session_state.benchmark_selection = "S&P 500"
+    
+    def update_benchmark_selection():
+        st.session_state.benchmark_selection = st.session_state.benchmark_select
+    
     benchmark = st.selectbox(
         "Benchmark for Comparison",
         list(benchmark_options.keys()),
-        key="benchmark_selection"
+        index=list(benchmark_options.keys()).index(st.session_state.benchmark_selection),
+        key="benchmark_select",
+        on_change=update_benchmark_selection
     )
     
     if benchmark == "Custom":
@@ -6241,7 +6687,21 @@ def display_score_tracking():
     
     # Select stock to view
     available_stocks = list(st.session_state.score_history.keys())
-    selected_stock = st.selectbox("Select Stock to View:", available_stocks, key="score_tracking_stock")
+    
+    # Initialize session state for selected stock
+    if 'score_tracking_selected_stock' not in st.session_state:
+        st.session_state.score_tracking_selected_stock = available_stocks[0] if available_stocks else ""
+    
+    def update_score_tracking_stock():
+        st.session_state.score_tracking_selected_stock = st.session_state.score_tracking_stock_select
+    
+    selected_stock = st.selectbox(
+        "Select Stock to View:", 
+        available_stocks, 
+        index=available_stocks.index(st.session_state.score_tracking_selected_stock) if st.session_state.score_tracking_selected_stock in available_stocks else 0,
+        key="score_tracking_stock_select",
+        on_change=update_score_tracking_stock
+    )
     
     if selected_stock:
         score_data = st.session_state.score_history[selected_stock]
@@ -7580,6 +8040,33 @@ def main():
     )
     st.title("📈 Advanced Stock Scoring System")
     st.markdown("Analyze stocks using multiple financial metrics with AI-powered scoring")
+    
+    # ⚠️ CRITICAL: Display data persistence warnings for Streamlit Cloud
+    if not st.session_state.get("backup_warnings_shown", False):
+        st.error("""
+        🚨 **CRITICAL DATA PERSISTENCE WARNING - STREAMLIT CLOUD**
+        
+        **Your data is temporary and WILL BE LOST when:**
+        • App restarts (daily automatic restarts)
+        • 30+ minutes of inactivity
+        • Browser refresh/closure
+        • App redeployment
+        
+        **🔐 PROTECT YOUR DATA:** Use backup features in Portfolio Manager!
+        """)
+        
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("✅ I Understand", type="primary"):
+                st.session_state.backup_warnings_shown = True
+                st.rerun()
+        
+        with col2:
+            if st.button("💾 Quick Backup"):
+                # Navigate to portfolio tab with backup interface
+                st.info("💡 Go to Portfolio Manager → Backup & Settings tab to backup your data")
+        
+        st.markdown("---")
 
     # Sidebar configuration
     with st.sidebar:
@@ -7588,10 +8075,27 @@ def main():
         with st.expander("Customize Weights"):
             new_weights = {}
             for metric, weight in list(st.session_state.score_weights.items()):
+                # Initialize session state for each weight if not exists
+                weight_key = f"weight_{metric.replace(' ', '_')}"
+                if weight_key not in st.session_state:
+                    st.session_state[weight_key] = weight
+                
+                def create_weight_updater(metric_name, weight_key):
+                    def update_weight():
+                        st.session_state.score_weights[metric_name] = st.session_state[weight_key]
+                    return update_weight
+                
                 new_weights[metric] = st.slider(
-                    metric, 0.0, 0.5, weight, 0.01,
-                    help=f"Current weight: {weight}"
+                    metric, 
+                    0.0, 
+                    0.5, 
+                    st.session_state[weight_key], 
+                    0.01,
+                    help=f"Current weight: {weight}",
+                    key=weight_key,
+                    on_change=create_weight_updater(metric, weight_key)
                 )
+            
             if st.button("Apply New Weights"):
                 st.session_state.score_weights.update(new_weights)
                 st.success("Weights updated!")
@@ -7690,20 +8194,38 @@ def main():
                 )
             
             with col2:
+                # Initialize session state for analysis depth
+                if 'analysis_depth' not in st.session_state:
+                    st.session_state.analysis_depth = "Comprehensive"
+                
+                def update_analysis_depth():
+                    st.session_state.analysis_depth = st.session_state.analysis_depth_select
+                
                 analysis_depth = st.selectbox(
                     "Analysis Depth",
                     ["Basic", "Standard", "Comprehensive"],
-                    index=2,
-                    help="Basic: Key metrics only, Standard: + Technical analysis, Comprehensive: + Alpha Vantage data"
+                    index=["Basic", "Standard", "Comprehensive"].index(st.session_state.analysis_depth),
+                    help="Basic: Key metrics only, Standard: + Technical analysis, Comprehensive: + Alpha Vantage data",
+                    key="analysis_depth_select",
+                    on_change=update_analysis_depth
                 )
             
             with col3:
+                # Initialize session state for max symbols
+                if 'max_symbols' not in st.session_state:
+                    st.session_state.max_symbols = 10
+                
+                def update_max_symbols():
+                    st.session_state.max_symbols = st.session_state.max_symbols_input
+                
                 max_symbols = st.number_input(
                     "Max Symbols",
                     min_value=1,
                     max_value=20,
-                    value=10,
-                    help="Limit symbols to avoid rate limits"
+                    value=st.session_state.max_symbols,
+                    help="Limit symbols to avoid rate limits",
+                    key="max_symbols_input",
+                    on_change=update_max_symbols
                 )
             
             # Enhanced analysis form
@@ -8140,44 +8662,65 @@ def main():
             # Danish-specific screening with enhanced features
             col1, col2, col3 = st.columns(3)
             
+            # Initialize session state for Danish screener controls
+            if 'danish_min_score' not in st.session_state:
+                st.session_state.danish_min_score = 6.0
+            if 'danish_max_stocks' not in st.session_state:
+                st.session_state.danish_max_stocks = 15
+            if 'danish_sector_filter' not in st.session_state:
+                st.session_state.danish_sector_filter = "All Sectors"
+            
             with col1:
+                def update_danish_min_score():
+                    st.session_state.danish_min_score = st.session_state.danish_min_score_slider
+                
                 min_score_danish = st.slider(
                     "Minimum Score", 
                     min_value=0.0, 
                     max_value=10.0, 
-                    value=6.0, 
+                    value=st.session_state.danish_min_score, 
                     step=0.1,
-                    key="danish_min_score"
+                    key="danish_min_score_slider",
+                    on_change=update_danish_min_score
                 )
             
             with col2:
+                def update_danish_max_stocks():
+                    st.session_state.danish_max_stocks = st.session_state.danish_max_stocks_input
+                
                 max_stocks_danish = st.number_input(
                     "Max Results", 
                     min_value=5, 
                     max_value=50, 
-                    value=15,
-                    key="danish_max_stocks"
+                    value=st.session_state.danish_max_stocks,
+                    key="danish_max_stocks_input",
+                    on_change=update_danish_max_stocks
                 )
             
             with col3:
+                def update_danish_sector_filter():
+                    st.session_state.danish_sector_filter = st.session_state.danish_sector_filter_select
+                
                 sector_filter = st.selectbox(
                     "Sector Filter",
                     ["All Sectors", "Healthcare", "Industrials", "Technology", "Energy", "Consumer Staples"],
-                    key="danish_sector_filter"
+                    index=["All Sectors", "Healthcare", "Industrials", "Technology", "Energy", "Consumer Staples"].index(st.session_state.danish_sector_filter),
+                    key="danish_sector_filter_select",
+                    on_change=update_danish_sector_filter
                 )
             
             if st.button("🚀 Screen Danish Stocks", type="primary", key="danish_screen"):
                 with st.spinner("Screening Danish stocks..."):
-                    results_df = screen_multi_market_stocks("Danish Stocks", min_score_danish, None)
+                    results_df = screen_multi_market_stocks("Danish Stocks", st.session_state.danish_min_score, None)
                 
                 if not results_df.empty:
                     # Apply sector filter if selected
-                    if sector_filter != "All Sectors":
-                        results_df = results_df[results_df['Sector'].str.contains(sector_filter, na=False)]
+                    if st.session_state.danish_sector_filter != "All Sectors":
+                        results_df = results_df[results_df['Sector'].str.contains(st.session_state.danish_sector_filter, na=False)]
                     
-                    display_df = results_df.head(max_stocks_danish)
+                    display_df = results_df.head(st.session_state.danish_max_stocks)
                     
-                    st.success(f"✅ Found **{len(results_df)}** Danish stocks with score ≥ {min_score_danish}")
+                    st.success(f"✅ Found **{len(results_df)}** Danish stocks with score ≥ {st.session_state.danish_min_score}")
                     
                     # Display results
                     st.dataframe(
@@ -8222,8 +8765,12 @@ def main():
                 "📈 Portfolio Alerts",
                 "🔄 Portfolio Rebalancing",
                 "🔍 Weekly Market Screener",
-                "⚙️ Settings & Migration"
+                "💾 Backup & Settings"
             ])
+            
+            # Display cloud persistence warnings at the top level
+            if not st.session_state.get("backup_warnings_shown", False):
+                st.session_state.cloud_backup_manager.display_cloud_persistence_warnings()
             
             with portfolio_tab1:
                 st.subheader("📊 Portfolio Dashboard")
@@ -8426,7 +8973,20 @@ def main():
                     holdings = enhanced_manager.portfolio_db.get_current_holdings()
                     
                     if not holdings.empty:
-                        selected_symbol = st.selectbox("Select holding to edit:", holdings['symbol'].tolist(), key="edit_holdings_selectbox")
+                        # Initialize session state for selected holding
+                        if 'edit_holdings_selected' not in st.session_state:
+                            st.session_state.edit_holdings_selected = holdings['symbol'].tolist()[0]
+                        
+                        def update_edit_holdings_selection():
+                            st.session_state.edit_holdings_selected = st.session_state.edit_holdings_selectbox_dropdown
+                        
+                        selected_symbol = st.selectbox(
+                            "Select holding to edit:", 
+                            holdings['symbol'].tolist(), 
+                            index=holdings['symbol'].tolist().index(st.session_state.edit_holdings_selected) if st.session_state.edit_holdings_selected in holdings['symbol'].tolist() else 0,
+                            key="edit_holdings_selectbox_dropdown",
+                            on_change=update_edit_holdings_selection
+                        )
                         
                         if selected_symbol:
                             current_holding = holdings[holdings['symbol'] == selected_symbol].iloc[0]
@@ -8474,11 +9034,35 @@ def main():
                         # Alert configuration
                         col1, col2, col3 = st.columns(3)
                         
+                        # Initialize session state for alert settings
+                        if 'alert_symbol_selected' not in st.session_state:
+                            st.session_state.alert_symbol_selected = holdings['symbol'].tolist()[0]
+                        if 'alert_type_selected' not in st.session_state:
+                            st.session_state.alert_type_selected = "Price Above"
+                        
                         with col1:
-                            alert_symbol = st.selectbox("Stock Symbol", holdings['symbol'].tolist(), key="alert_symbol_selectbox")
+                            def update_alert_symbol():
+                                st.session_state.alert_symbol_selected = st.session_state.alert_symbol_selectbox_dropdown
+                            
+                            alert_symbol = st.selectbox(
+                                "Stock Symbol", 
+                                holdings['symbol'].tolist(), 
+                                index=holdings['symbol'].tolist().index(st.session_state.alert_symbol_selected) if st.session_state.alert_symbol_selected in holdings['symbol'].tolist() else 0,
+                                key="alert_symbol_selectbox_dropdown",
+                                on_change=update_alert_symbol
+                            )
                         
                         with col2:
-                            alert_type = st.selectbox("Alert Type", ["Price Above", "Price Below", "% Change"], key="alert_type_selectbox")
+                            def update_alert_type():
+                                st.session_state.alert_type_selected = st.session_state.alert_type_selectbox_dropdown
+                            
+                            alert_type = st.selectbox(
+                                "Alert Type", 
+                                ["Price Above", "Price Below", "% Change"], 
+                                index=["Price Above", "Price Below", "% Change"].index(st.session_state.alert_type_selected),
+                                key="alert_type_selectbox_dropdown",
+                                on_change=update_alert_type
+                            )
                         
                         with col3:
                             alert_value = st.number_input("Alert Value", min_value=0.01, value=100.0, step=0.01, key="alert_value_input")
@@ -8577,11 +9161,28 @@ def main():
                             st.success(f"✅ Added {len(selected_stocks)} stocks to portfolio!")
                             
             with portfolio_tab6:
-                st.subheader("⚙️ Settings & Migration")
+                st.subheader("💾 Backup & Data Persistence")
                 
-                st.markdown("### 🔧 Portfolio Settings")
+                # Display comprehensive data persistence warnings
+                st.warning("""
+                ⚠️ **CRITICAL: Streamlit Cloud Data Persistence**
                 
-                # Database management
+                **Your data is stored temporarily and WILL BE LOST when:**
+                - App restarts (happens daily on Streamlit Cloud)
+                - User inactivity (30+ minutes)
+                - App redeployment or updates
+                - Browser refresh or closure
+                
+                **🔐 PROTECT YOUR DATA:** Use backup features below!
+                """)
+                
+                # Backup & Restore Interface
+                st.session_state.cloud_backup_manager.display_backup_interface()
+                
+                st.markdown("---")
+                st.markdown("### ⚙️ Enhanced Portfolio Settings")
+                
+                # Database management for enhanced portfolio
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -8593,19 +9194,26 @@ def main():
                         
                         if st.button("🗑️ Clear All Holdings", type="secondary"):
                             if st.button("⚠️ Confirm Clear", key="confirm_clear_enhanced"):
-                                # Add clear functionality here
-                                st.warning("Clear functionality to be implemented")
+                                try:
+                                    # Clear enhanced portfolio database
+                                    enhanced_manager.portfolio_db.clear_all_holdings()
+                                    st.success("✅ All holdings cleared from enhanced portfolio!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Error clearing holdings: {e}")
                         
-                        if st.button("📥 Export Portfolio", type="secondary", key="export_portfolio_btn"):
+                        if st.button("📥 Export Enhanced Portfolio", type="secondary", key="export_enhanced_portfolio_btn"):
                             holdings = enhanced_manager.portfolio_db.get_current_holdings()
                             if not holdings.empty:
                                 csv = holdings.to_csv(index=False)
                                 st.download_button(
-                                    "📥 Download CSV",
+                                    "📥 Download Enhanced Portfolio CSV",
                                     data=csv,
                                     file_name=f"enhanced_portfolio_{datetime.now().strftime('%Y%m%d')}.csv",
                                     mime="text/csv"
                                 )
+                            else:
+                                st.info("No holdings to export")
                 
                 with col2:
                     st.markdown("**🔄 Migration Tools**")
@@ -8616,31 +9224,145 @@ def main():
                         
                         if st.button("🔄 Migrate Legacy Portfolio", type="primary", key="migrate_legacy_portfolio"):
                             migrated_count = 0
+                            errors = []
+                            
                             for symbol in st.session_state.portfolio:
                                 try:
-                                    enhanced_manager.portfolio_db.add_holding(symbol, 1.0, 100.0)
+                                    # Get current price for better migration
+                                    current_price = get_simple_current_price(symbol)
+                                    price = current_price if current_price and current_price > 0 else 100.0
+                                    
+                                    enhanced_manager.portfolio_db.add_holding(symbol, 1.0, price)
                                     migrated_count += 1
-                                except:
-                                    pass
+                                except Exception as e:
+                                    errors.append(f"{symbol}: {str(e)}")
                             
                             if migrated_count > 0:
                                 st.success(f"✅ Migrated {migrated_count} stocks to enhanced portfolio!")
-                                st.session_state.portfolio = []  # Clear legacy portfolio
+                                if errors:
+                                    st.warning(f"⚠️ {len(errors)} stocks had issues during migration")
+                                
+                                # Clear legacy portfolio after successful migration
+                                st.session_state.portfolio = []
                                 st.rerun()
+                            else:
+                                st.error("❌ No stocks could be migrated")
+                                if errors:
+                                    st.error("Errors: " + "; ".join(errors[:3]))
                     else:
                         st.info("No legacy portfolio found")
                 
-                # Feature toggles
+                # Sync enhanced portfolio with session state
                 st.markdown("---")
-                st.markdown("### ⚙️ Feature Settings")
+                st.markdown("**🔄 Portfolio Synchronization**")
                 
-                auto_sync = st.checkbox("🔄 Auto-sync with monitoring", value=False)
-                email_alerts = st.checkbox("📧 Email alerts", value=False)
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📤 Sync Enhanced → Session State", help="Copy enhanced portfolio to session state for basic portfolio features"):
+                        try:
+                            holdings = enhanced_manager.portfolio_db.get_current_holdings()
+                            if not holdings.empty:
+                                st.session_state.portfolio = holdings['symbol'].tolist()
+                                
+                                # Also sync holdings data
+                                portfolio_holdings = {}
+                                for _, row in holdings.iterrows():
+                                    portfolio_holdings[row['symbol']] = {
+                                        "quantity": row['quantity'],
+                                        "purchase_price": row['purchase_price'],
+                                        "purchase_date": row['purchase_date']
+                                    }
+                                st.session_state.portfolio_holdings = portfolio_holdings
+                                
+                                st.success(f"✅ Synced {len(holdings)} stocks to session state!")
+                            else:
+                                st.info("No enhanced portfolio data to sync")
+                        except Exception as e:
+                            st.error(f"❌ Sync failed: {e}")
                 
-                if email_alerts:
-                    email_address = st.text_input("Email Address", placeholder="your.email@example.com")
+                with col2:
+                    if st.button("📥 Sync Session State → Enhanced", help="Copy session state portfolio to enhanced database"):
+                        try:
+                            portfolio_symbols = st.session_state.get('portfolio', [])
+                            portfolio_holdings = st.session_state.get('portfolio_holdings', {})
+                            
+                            if portfolio_symbols:
+                                synced_count = 0
+                                for symbol in portfolio_symbols:
+                                    holdings_data = portfolio_holdings.get(symbol, {})
+                                    quantity = holdings_data.get('quantity', 1.0)
+                                    purchase_price = holdings_data.get('purchase_price', 0.0)
+                                    
+                                    # Get current price if purchase price is 0
+                                    if purchase_price == 0.0:
+                                        current_price = get_simple_current_price(symbol)
+                                        purchase_price = current_price if current_price and current_price > 0 else 100.0
+                                    
+                                    try:
+                                        enhanced_manager.portfolio_db.add_holding(symbol, quantity, purchase_price)
+                                        synced_count += 1
+                                    except:
+                                        pass  # Skip duplicates
+                                
+                                st.success(f"✅ Synced {synced_count} stocks to enhanced portfolio!")
+                            else:
+                                st.info("No session state portfolio to sync")
+                        except Exception as e:
+                            st.error(f"❌ Sync failed: {e}")
                 
-                weekly_reports = st.checkbox("📊 Weekly reports", value=False)
+                # Data persistence settings
+                st.markdown("---")
+                st.markdown("### 🔔 Data Persistence Settings")
+                
+                # Initialize session state for backup settings
+                if 'auto_backup_reminder' not in st.session_state:
+                    st.session_state.auto_backup_reminder = True
+                if 'backup_frequency_hours' not in st.session_state:
+                    st.session_state.backup_frequency_hours = 24
+                
+                def update_auto_backup_reminder():
+                    st.session_state.auto_backup_reminder = st.session_state.auto_backup_reminder_checkbox
+                
+                def update_backup_frequency():
+                    st.session_state.backup_frequency_hours = st.session_state.backup_frequency_slider
+                
+                auto_backup_reminder = st.checkbox(
+                    "🔔 Enable backup reminders",
+                    value=st.session_state.auto_backup_reminder,
+                    help="Show reminders to backup your data periodically",
+                    key="auto_backup_reminder_checkbox",
+                    on_change=update_auto_backup_reminder
+                )
+                
+                backup_frequency = st.slider(
+                    "Backup reminder frequency (hours)",
+                    min_value=1,
+                    max_value=168,  # 1 week
+                    value=st.session_state.backup_frequency_hours,
+                    help="How often to show backup reminders",
+                    key="backup_frequency_slider",
+                    on_change=update_backup_frequency
+                )
+                
+                # Show last backup info
+                if 'last_backup_time' in st.session_state:
+                    last_backup = datetime.fromisoformat(st.session_state.last_backup_time)
+                    time_since = datetime.now() - last_backup
+                    
+                    if time_since.total_seconds() < 3600:  # Less than 1 hour
+                        st.success(f"✅ Last backup: {int(time_since.total_seconds() / 60)} minutes ago")
+                    elif time_since.total_seconds() < 86400:  # Less than 1 day
+                        st.info(f"ℹ️ Last backup: {int(time_since.total_seconds() / 3600)} hours ago")
+                    else:
+                        st.warning(f"⚠️ Last backup: {time_since.days} days ago - Consider creating a new backup!")
+                else:
+                    st.warning("⚠️ No backup history found - Create your first backup!")
+                
+                # Quick backup action
+                if st.button("� Quick Backup Now", type="primary"):
+                    st.session_state.last_backup_time = datetime.now().isoformat()
+                    st.success("✅ Backup timestamp updated! Use the backup interface above to download your data.")
+                    st.rerun()
 
     # --- What-If Analysis (Enhanced Features Only) ---
     if st.session_state.get('enhanced_features_enabled', False):
@@ -9477,11 +10199,70 @@ def main():
             """)
         
         with help_tab4:
-            st.subheader("🔧 Advanced Features")
-            st.markdown("""
-            ### 🎯 **Advanced Capabilities**
+            st.subheader("🔧 Advanced Features & Data Backup")
             
-            #### 🧠 **Dynamic Intelligence (NEW)**
+            # Data Persistence Warning Section
+            st.error("""
+            🚨 **CRITICAL: DATA PERSISTENCE ON STREAMLIT CLOUD**
+            
+            **Your data is stored temporarily and WILL BE LOST when:**
+            - App restarts (happens daily on Streamlit Cloud)
+            - User inactivity (30+ minutes timeout)
+            - Browser refresh or closure
+            - App redeployment or updates
+            """)
+            
+            st.markdown("""
+            ### 💾 **Data Backup & Recovery Guide**
+            
+            #### 🔐 **Why Backup?**
+            - **Streamlit Cloud Limitation**: Session state is temporary
+            - **Data Loss Protection**: Preserve your portfolio and settings
+            - **Migration**: Move between environments seamlessly
+            - **Recovery**: Restore after app restarts or crashes
+            
+            #### 📥 **Backup Methods**
+            
+            **1. Portfolio Manager → Backup & Settings Tab**
+            - **JSON Format**: Complete backup (recommended)
+            - **CSV Format**: Portfolio data only
+            - **Excel Format**: Multi-sheet backup with settings
+            
+            **2. Backup Frequency**
+            - **Daily**: For active traders
+            - **Weekly**: For long-term investors
+            - **Before Analysis**: Before major portfolio changes
+            
+            #### 🔄 **Restore Process**
+            1. Go to Portfolio Manager → Backup & Settings
+            2. Upload your backup file (JSON/CSV/Excel)
+            3. Click "Restore Portfolio"
+            4. Refresh the page to see restored data
+            
+            #### 📋 **What Gets Backed Up**
+            - ✅ Portfolio holdings and quantities
+            - ✅ Purchase prices and dates
+            - ✅ Score weight preferences
+            - ✅ Analysis history
+            - ✅ Selected symbols
+            - ❌ Cached price data (refreshed automatically)
+            
+            #### 🛡️ **Best Practices**
+            - **Regular Backups**: Set reminders in the app
+            - **Multiple Formats**: Keep both JSON and CSV backups
+            - **Cloud Storage**: Store backups in Dropbox/Google Drive
+            - **Version Control**: Include dates in backup filenames
+            
+            #### ⚠️ **Emergency Recovery**
+            If you lose data:
+            1. Don't panic - your external backups are safe
+            2. Upload your most recent backup file
+            3. Check if portfolio symbols are correctly restored
+            4. Recreate any missing purchase prices
+            
+            ### 🎯 **Advanced System Features**
+            
+            #### 🧠 **Dynamic Intelligence**
             - **Sector Benchmarking**: Industry-relative performance analysis
             - **Momentum Scoring**: Technical trend integration
             - **Financial Health**: Multi-dimensional risk assessment
@@ -9493,9 +10274,11 @@ def main():
             - Sector and market cap filtering
             - Export results for further analysis
             
-            #### 💼 **Portfolio Management**
-            - **Personal Portfolio**: Track your holdings
+            #### 💼 **Enhanced Portfolio Management**
+            - **SQLite Database**: Local persistent storage (enhanced mode)
             - **Automated Screening**: Weekly market scans
+            - **What-If Analysis**: Scenario modeling and risk assessment
+            - **Performance Tracking**: Historical returns and risk metrics
             - **Alert System**: Get notified of changes
             - **Performance Tracking**: Monitor your investments
             """)
