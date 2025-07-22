@@ -1317,7 +1317,11 @@ def get_3year_price_performance(symbol):
 
 # Enhanced scoring functions
 def score_pe(pe, industry_pe, allow_neutral=True):
-    """Enhanced P/E scoring with industry comparison"""
+    """Enhanced P/E scoring with industry comparison and robust None handling"""
+    # Safely convert inputs to float
+    pe = safe_float(pe, 0)
+    industry_pe = safe_float(industry_pe, 20)  # Default industry PE
+    
     if pe <= 0:
         # For missing P/E data, return neutral score instead of 0 to indicate "unknown but not necessarily bad"
         return 5 if allow_neutral else 0
@@ -1343,7 +1347,11 @@ def score_pe(pe, industry_pe, allow_neutral=True):
         return 0
 
 def score_forward_pe(forward_pe, industry_pe):
-    """Score based on forward P/E (more predictive than trailing)"""
+    """Score based on forward P/E (more predictive than trailing) with safe None handling"""
+    # Safely convert inputs to float
+    forward_pe = safe_float(forward_pe, 0)
+    industry_pe = safe_float(industry_pe, 20)
+    
     if forward_pe <= 0:
         return 0
     
@@ -1365,7 +1373,10 @@ def score_forward_pe(forward_pe, industry_pe):
         return 1
 
 def score_peg(peg, allow_neutral=True):
-    """Enhanced PEG scoring"""
+    """Enhanced PEG scoring with safe None handling"""
+    # Safely convert input to float
+    peg = safe_float(peg, 0)
+    
     if peg <= 0:
         # For missing PEG data, return neutral score instead of 0
         return 5 if allow_neutral else 0
@@ -1383,7 +1394,9 @@ def score_peg(peg, allow_neutral=True):
         return 0
 
 def score_pb(pb):
-    """Price-to-Book scoring"""
+    """Price-to-Book scoring with safe None handling"""
+    pb = safe_float(pb, 0)
+    
     if pb <= 0:
         return 0
     if pb < 1.0:
@@ -1398,7 +1411,9 @@ def score_pb(pb):
         return 2
 
 def score_roe(roe):
-    """Return on Equity scoring"""
+    """Return on Equity scoring with safe None handling"""
+    roe = safe_float(roe, 0)
+    
     if roe <= 0:
         return 0
     if roe > 25:
@@ -1412,10 +1427,12 @@ def score_roe(roe):
     elif roe > 5:
         return 2
     else:
-        return 0
+        return 1
 
 def score_roe_dynamic(roe, sector):
     """Enhanced ROE scoring with dynamic benchmarking"""
+    roe = safe_float(roe, 0)
+    
     if roe <= 0:
         return 0
     
@@ -1445,6 +1462,8 @@ def score_roe_dynamic(roe, sector):
 
 def score_gross_margin_dynamic(gm, sector):
     """Enhanced gross margin scoring with dynamic benchmarking"""
+    gm = safe_float(gm, 0)
+    
     if gm <= 0:
         return 0
     
@@ -1470,6 +1489,8 @@ def score_gross_margin_dynamic(gm, sector):
 
 def score_revenue_growth_dynamic(growth, sector):
     """Enhanced revenue growth scoring with dynamic benchmarking"""
+    growth = safe_float(growth, 0)
+    
     benchmarks = get_industry_benchmarks(sector)
     industry_growth = benchmarks["revenue_growth"]
     
@@ -1507,6 +1528,8 @@ def score_revenue_growth_dynamic(growth, sector):
 
 def score_debt_equity_dynamic(de, sector):
     """Enhanced debt/equity scoring with dynamic benchmarking"""
+    de = safe_float(de, 0)
+    
     if de < 0:
         return 0
     
@@ -1542,7 +1565,9 @@ def score_debt_equity_dynamic(de, sector):
             return 1
 
 def score_eps_growth(growth):
-    """EPS growth scoring"""
+    """EPS growth scoring with safe None handling"""
+    growth = safe_float(growth, 0)
+    
     if growth > 25:
         return 10
     elif growth > 15:
@@ -1557,7 +1582,9 @@ def score_eps_growth(growth):
         return 0
 
 def score_revenue_growth(growth, has_data=True):
-    """Revenue growth scoring"""
+    """Revenue growth scoring with safe None handling"""
+    growth = safe_float(growth, 0)
+    
     if not has_data or growth is None:
         return 0  # Return 0 instead of None to keep metric visible
     if growth > 20:
@@ -1598,6 +1625,8 @@ def score_fcf_trend(fcf_values, has_data=True):
 
 def score_debt_equity(de):
     """Debt-to-equity scoring - expects percentage values from Yahoo Finance"""
+    de = safe_float(de, 0)
+    
     if de < 0:
         return 0
     if de < 30:  # Less than 30%
@@ -1612,7 +1641,9 @@ def score_debt_equity(de):
         return 2
 
 def score_dividend_yield(dy, allow_neutral=True):
-    """Dividend yield scoring"""
+    """Dividend yield scoring with safe None handling"""
+    dy = safe_float(dy, 0)
+    
     if dy <= 0:
         # For missing dividend data, return neutral score - company might not pay dividends
         return 5 if allow_neutral else 0
@@ -1626,7 +1657,9 @@ def score_dividend_yield(dy, allow_neutral=True):
         return 4
 
 def score_gross_margin(gm):
-    """Gross margin scoring"""
+    """Gross margin scoring with safe None handling"""
+    gm = safe_float(gm, 0)
+    
     if gm <= 0:
         return 0
     if gm > 60:
@@ -1642,6 +1675,8 @@ def score_gross_margin(gm):
 
 def score_ev_ebitda(ev_ebitda):
     """EV/EBITDA scoring - better for companies with different capital structures"""
+    ev_ebitda = safe_float(ev_ebitda, 0)
+    
     if ev_ebitda <= 0:
         return 0
     if ev_ebitda < 8:
@@ -1659,6 +1694,8 @@ def score_ev_ebitda(ev_ebitda):
 
 def score_price_sales(ps_ratio):
     """Price-to-Sales scoring - good for growth companies"""
+    ps_ratio = safe_float(ps_ratio, 0)
+    
     if ps_ratio <= 0:
         return 0
     if ps_ratio < 1:
@@ -1676,6 +1713,8 @@ def score_price_sales(ps_ratio):
 
 def score_analyst_upside(upside_percent):
     """Score based on analyst price target upside"""
+    upside_percent = safe_float(upside_percent, 0)
+    
     if upside_percent > 25:
         return 10
     elif upside_percent > 15:
@@ -3129,17 +3168,43 @@ def calculate_scores_yahoo(info, industry_pe=20):
         return scores, info
         
     except Exception as e:
-        st.error(f"Error calculating scores: {e}")
+        st.error(f"Error calculating scores: {str(e)}")
+        import traceback
+        st.error(f"Detailed error: {traceback.format_exc()}")
         return None, None
 
 def safe_float(value, default=0):
-    """Safely convert value to float"""
+    """Safely convert value to float with robust None handling"""
     try:
-        if value is None or value == "None" or value == "":
+        if value is None or value == "None" or value == "" or str(value).lower() == 'nan':
+            return default
+        # Handle string representations of None or empty
+        if isinstance(value, str) and value.strip() == "":
             return default
         return float(value)
     except (ValueError, TypeError):
         return default
+
+def safe_comparison(value1, value2, operation="<", default_result=False):
+    """Safely compare values, handling None cases"""
+    try:
+        val1 = safe_float(value1)
+        val2 = safe_float(value2)
+        
+        if operation == "<":
+            return val1 < val2
+        elif operation == "<=":
+            return val1 <= val2
+        elif operation == ">":
+            return val1 > val2
+        elif operation == ">=":
+            return val1 >= val2
+        elif operation == "==":
+            return val1 == val2
+        else:
+            return default_result
+    except:
+        return default_result
 
 def get_recommendation(total_score):
     """Enhanced recommendation system"""
@@ -3466,416 +3531,473 @@ def screen_multi_market_stocks(market_selection, min_score=5.0, custom_symbols=N
     """
     Screen stocks from multiple markets using optimized batch processing
     """
-    # Get symbols based on market selection
-    symbols_to_screen = get_stock_symbols_for_market(market_selection, custom_symbols)
+    # Add NumPy compatibility setup for market screener
+    import warnings
+    import os
     
-    if not symbols_to_screen:
-        return pd.DataFrame()
+    # Set environment variables to suppress NumPy warnings
+    os.environ['PYTHONWARNINGS'] = 'ignore'
+    os.environ['NUMPY_HIDE_WARNINGS'] = '1'
     
-    st.info(f"Screening {len(symbols_to_screen)} stocks...")
+    # Import and patch numpy to prevent attribute errors
+    try:
+        import numpy as np
+        # Add missing aliases to prevent numpy deprecation errors
+        if not hasattr(np, 'bool'):
+            np.bool = bool
+        if not hasattr(np, 'int'):
+            np.int = int  
+        if not hasattr(np, 'float'):
+            np.float = float
+    except:
+        pass
     
-    # Use optimized batch analysis
-    analysis_results = analyze_multiple_stocks(symbols_to_screen)
-    
-    results = []
-    processed = 0
-    
-    for symbol, data in analysis_results.items():
-        processed += 1
-        if processed % 10 == 0:  # Update progress every 10 stocks
-            st.write(f"Processed {processed}/{len(symbols_to_screen)} stocks...")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        warnings.filterwarnings("ignore")
         
-        if not data or 'scores' not in data or 'info' not in data:
-            continue
-            
-        scores = data['scores']
-        info = data['info']
-        
-        # Calculate overall score
-        available_weights = {k: st.session_state.score_weights.get(k, 0) 
-                           for k in scores if k in st.session_state.score_weights}
-        
-        if available_weights:
-            total_weight = sum(available_weights.values())
-            if total_weight > 0:
-                normalized_weights = {k: v/total_weight for k, v in available_weights.items()}
-                overall_score = sum(scores[k] * normalized_weights[k] for k in available_weights)
-            else:
-                overall_score = sum(scores.values()) / len(scores)
-        else:
-            overall_score = sum(scores.values()) / len(scores)
-        
-        # Only include stocks above minimum score
-        if overall_score >= min_score:
-            stock_data = {}
-            
-            # Basic info
-            if market_selection == "Danish Stocks":
-                original_symbols = [k for k, v in DANISH_STOCKS.items() if v == symbol]
-                original_symbol = original_symbols[0] if original_symbols else symbol
-                stock_data['Original_Symbol'] = original_symbol
-            else:
-                stock_data['Original_Symbol'] = symbol
-            
-            stock_data['Yahoo_Symbol'] = symbol
-            stock_data['Company'] = info.get('name', 'N/A')[:30]
-            stock_data['Market'] = market_selection
-            stock_data['Sector'] = info.get('sector', 'N/A')
-            stock_data['Industry'] = info.get('industry', 'N/A')[:25]
-            
-            # Financial data
-            stock_data['Current_Price'] = info.get('currentPrice', info.get('price', 0))
-            stock_data['Market_Cap'] = info.get('marketCap', 0)
-            stock_data['P/E_Ratio'] = round(info.get('pe', 0), 2) if info.get('pe') else 0
-            stock_data['PEG_Ratio'] = round(info.get('peg', 0), 2) if info.get('peg') else 0
-            stock_data['Price_to_Book'] = round(info.get('pb', 0), 2) if info.get('pb') else 0
-            stock_data['ROE'] = round(info.get('roe', 0) * 100, 1) if info.get('roe') else 0
-            stock_data['Revenue_Growth'] = round(info.get('revenue_growth', 0) * 100, 1) if info.get('revenue_growth') else 0
-            stock_data['Dividend_Yield'] = round(info.get('dy', 0), 2) if info.get('dy') else 0
-            stock_data['Debt_to_Equity'] = round(info.get('de', 0), 1) if info.get('de') else 0
-            
-            # Add score and recommendation
-            stock_data['Final_Score'] = round(overall_score, 2)
-            recommendation, color = get_recommendation(overall_score)
-            stock_data['Recommendation'] = recommendation
-            stock_data['Rec_Color'] = color
-            
-            # Add individual metric scores
-            for metric_name, metric_score in scores.items():
-                clean_name = metric_name.replace(' ', '_').replace('/', '_').replace('-', '_').replace('(', '').replace(')', '')
-                score_column = f"{clean_name}_Score"
-                stock_data[score_column] = metric_score
-            
-            results.append(stock_data)
-    
-    # Create DataFrame and sort by final score
-    if results:
         try:
-            df = pd.DataFrame(results)
+            # Get symbols based on market selection
+            symbols_to_screen = get_stock_symbols_for_market(market_selection, custom_symbols)
             
-            # Check for duplicate columns and remove if any
-            if len(df.columns) != len(set(df.columns)):
-                df = df.loc[:, ~df.columns.duplicated()]
+            if not symbols_to_screen:
+                st.warning(f"No symbols found for market selection: {market_selection}")
+                return pd.DataFrame()
             
-            # Sort by final score descending
-            df = df.sort_values('Final_Score', ascending=False)
-            return df
+            st.info(f"📊 Screening {len(symbols_to_screen)} stocks from {market_selection}...")
             
-        except Exception as e:
-            st.error(f"Error creating results DataFrame: {str(e)}")
+            # Validate session state weights exist
+            if 'score_weights' not in st.session_state:
+                st.error("❌ Score weights not found in session state. Please go to Tab 1 first to initialize weights.")
+                return pd.DataFrame()
+            
+            # Use optimized batch analysis with error handling
+            try:
+                st.write("🔄 Starting stock analysis...")
+                analysis_results = analyze_multiple_stocks(symbols_to_screen)
+                st.success(f"✅ Analysis completed for {len(analysis_results)} stocks")
+            except Exception as analysis_error:
+                st.error(f"❌ Error during stock analysis: {str(analysis_error)}")
+                import traceback
+                st.code(traceback.format_exc())
+                return pd.DataFrame()
+            
+            results = []
+            processed = 0
+            
+            st.write("📈 Processing results...")
+            for symbol, data in analysis_results.items():
+                try:
+                    processed += 1
+                    if processed % 10 == 0:  # Update progress every 10 stocks
+                        st.write(f"Processed {processed}/{len(symbols_to_screen)} stocks...")
+                    
+                    if not data or 'scores' not in data or 'info' not in data:
+                        continue
+                        
+                    scores = data['scores']
+                    info = data['info']
+                    
+                    # Calculate overall score with error handling
+                    try:
+                        available_weights = {k: st.session_state.score_weights.get(k, 0) 
+                                           for k in scores if k in st.session_state.score_weights}
+                        
+                        if available_weights:
+                            total_weight = sum(available_weights.values())
+                            if total_weight > 0:
+                                normalized_weights = {k: v/total_weight for k, v in available_weights.items()}
+                                overall_score = sum(safe_float(scores[k], 0) * safe_float(normalized_weights[k], 0) for k in available_weights)
+                            else:
+                                valid_scores = [safe_float(score, 0) for score in scores.values()]
+                                overall_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+                        else:
+                            valid_scores = [safe_float(score, 0) for score in scores.values()]
+                            overall_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+                    except Exception as score_error:
+                        # Fallback to simple average if weighting fails
+                        st.warning(f"Error calculating score for {symbol}: {str(score_error)}")
+                        valid_scores = [safe_float(score, 0) for score in scores.values()]
+                        overall_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+                    
+                    # Only include stocks above minimum score
+                    if overall_score >= min_score:
+                        stock_data = {}
+                        
+                        # Basic info
+                        if market_selection == "Danish Stocks":
+                            original_symbols = [k for k, v in DANISH_STOCKS.items() if v == symbol]
+                            original_symbol = original_symbols[0] if original_symbols else symbol
+                            stock_data['Original_Symbol'] = original_symbol
+                        else:
+                            stock_data['Original_Symbol'] = symbol
+                        
+                        stock_data['Yahoo_Symbol'] = symbol
+                        stock_data['Company'] = info.get('name', 'N/A')[:30]
+                        stock_data['Market'] = market_selection
+                        stock_data['Sector'] = info.get('sector', 'N/A')
+                        stock_data['Industry'] = info.get('industry', 'N/A')[:25]
+                        
+                        # Financial data
+                        stock_data['Current_Price'] = info.get('currentPrice', info.get('price', 0))
+                        stock_data['Market_Cap'] = info.get('marketCap', 0)
+                        stock_data['P/E_Ratio'] = round(info.get('pe', 0), 2) if info.get('pe') else 0
+                        stock_data['PEG_Ratio'] = round(info.get('peg', 0), 2) if info.get('peg') else 0
+                        stock_data['Price_to_Book'] = round(info.get('pb', 0), 2) if info.get('pb') else 0
+                        stock_data['ROE'] = round(info.get('roe', 0) * 100, 1) if info.get('roe') else 0
+                        stock_data['Revenue_Growth'] = round(info.get('revenue_growth', 0) * 100, 1) if info.get('revenue_growth') else 0
+                        stock_data['Dividend_Yield'] = round(info.get('dy', 0), 2) if info.get('dy') else 0
+                        stock_data['Debt_to_Equity'] = round(info.get('de', 0), 1) if info.get('de') else 0
+                        
+                        # Add score and recommendation
+                        stock_data['Final_Score'] = round(overall_score, 2)
+                        recommendation, color = get_recommendation(overall_score)
+                        stock_data['Recommendation'] = recommendation
+                        stock_data['Rec_Color'] = color
+                        
+                        # Add individual metric scores
+                        for metric_name, metric_score in scores.items():
+                            clean_name = metric_name.replace(' ', '_').replace('/', '_').replace('-', '_').replace('(', '').replace(')', '')
+                            score_column = f"{clean_name}_Score"
+                            stock_data[score_column] = metric_score
+                        
+                        results.append(stock_data)
+                    
+                except Exception as stock_error:
+                    # Individual stock processing error - continue with next stock
+                    continue
+            
+            # Create DataFrame and sort by final score
+            if results:
+                try:
+                    df = pd.DataFrame(results)
+                    
+                    # Check for duplicate columns and remove if any
+                    if len(df.columns) != len(set(df.columns)):
+                        df = df.loc[:, ~df.columns.duplicated()]
+                    
+                    # Sort by final score descending
+                    df = df.sort_values('Final_Score', ascending=False)
+                    return df
+                    
+                except Exception as e:
+                    st.error(f"Error creating results DataFrame: {str(e)}")
+                    return pd.DataFrame()
+            else:
+                return pd.DataFrame()
+                
+        except Exception as main_error:
+            st.error(f"Error in market screening: {str(main_error)}")
             return pd.DataFrame()
-    else:
-        return pd.DataFrame()
+
+def display_screening_results(results_df, market_selection, min_score):
+    """
+    Display the screening results in a nicely formatted way
+    """
+    if results_df is not None and not results_df.empty:
+        st.success(f"✅ Found **{len(results_df)}** stocks from {market_selection} with score ≥ {min_score}")
+        
+        # Main results table
+        st.subheader(f"🏆 Top Stocks from {market_selection}")
+        
+        display_columns = [
+            'Original_Symbol', 'Company', 'Final_Score', 'Recommendation', 'Sector', 
+            'Current_Price', 'P/E_Ratio', 'ROE', 'Revenue_Growth', 'Dividend_Yield'
+        ]
+        
+        # Filter columns that exist in the dataframe
+        available_columns = [col for col in display_columns if col in results_df.columns]
+        
+        st.dataframe(
+            results_df[available_columns],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                'Final_Score': st.column_config.NumberColumn('Score', format="%.2f"),
+                'Current_Price': st.column_config.NumberColumn('Price', format="$%.2f"),
+                'P/E_Ratio': st.column_config.NumberColumn('P/E', format="%.1f"),
+                'ROE': st.column_config.NumberColumn('ROE (%)', format="%.1f"),
+                'Revenue_Growth': st.column_config.NumberColumn('Rev Growth (%)', format="%.1f"),
+                'Dividend_Yield': st.column_config.NumberColumn('Div Yield (%)', format="%.1f"),
+            }
+        )
+        
+        # Add summary statistics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            avg_score = results_df['Final_Score'].mean()
+            st.metric("Average Score", f"{avg_score:.1f}")
+        
+        with col2:
+            if 'Current_Price' in results_df.columns:
+                avg_price = results_df['Current_Price'].mean()
+                st.metric("Average Price", f"${avg_price:.2f}")
+        
+        with col3:
+            if 'P/E_Ratio' in results_df.columns:
+                avg_pe = results_df['P/E_Ratio'].mean()
+                st.metric("Average P/E", f"{avg_pe:.1f}")
+        
+        with col4:
+            if 'ROE' in results_df.columns:
+                avg_roe = results_df['ROE'].mean()
+                st.metric("Average ROE", f"{avg_roe:.1f}%")
+        
+        # Top performers section
+        if len(results_df) >= 3:
+            st.subheader("🥇 Top 3 Performers")
+            top_3 = results_df.head(3)
+            
+            for idx, row in top_3.iterrows():
+                with st.expander(f"#{idx+1} {row.get('Original_Symbol', 'N/A')} - {row.get('Company', 'Unknown')} (Score: {row.get('Final_Score', 0):.2f})"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Sector:** {row.get('Sector', 'N/A')}")
+                        st.write(f"**Recommendation:** {row.get('Recommendation', 'N/A')}")
+                        if 'Current_Price' in row:
+                            st.write(f"**Current Price:** ${row.get('Current_Price', 0):.2f}")
+                    
+                    with col2:
+                        if 'P/E_Ratio' in row:
+                            st.write(f"**P/E Ratio:** {row.get('P/E_Ratio', 0):.1f}")
+                        if 'ROE' in row:
+                            st.write(f"**ROE:** {row.get('ROE', 0):.1f}%")
+                        if 'Dividend_Yield' in row:
+                            st.write(f"**Dividend Yield:** {row.get('Dividend_Yield', 0):.1f}%")
 
 def display_danish_stocks_screener():
     """
     Display the Multi-Market stocks screening interface
     """
-    st.header("🔍 Multi-Market Stock Screener")
-    st.markdown("Screen stocks from multiple markets using the comprehensive scoring system from Tab 1")
-    
-    # Market selection and configuration section
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
-    
-    with col1:
-        market_selection = st.selectbox(
-            "Select Market",
-            options=["Danish Stocks", "S&P 500", "NASDAQ 100", "European Stocks", "Custom Symbols"],
-            help="Choose which market or stock universe to screen"
-        )
-    
-    with col2:
-        min_score = st.slider(
-            "Minimum Score", 
-            min_value=0.0, 
-            max_value=10.0, 
-            value=5.0, 
-            step=0.1,
-            help="Only show stocks with score above this threshold"
-        )
-    
-    with col3:
-        max_stocks = st.number_input(
-            "Max Results", 
-            min_value=10, 
-            max_value=100, 
-            value=25,
-            help="Maximum number of stocks to display"
-        )
-    
-    with col4:
-        # Dynamic info based on market selection
-        if market_selection == "Danish Stocks":
-            st.info(f"📊 Total Danish stocks available: **{len(set(DANISH_STOCKS.values()))}**")
-        elif market_selection == "S&P 500":
-            st.info("📊 S&P 500 companies: **~500 stocks**")
-        elif market_selection == "NASDAQ 100":
-            st.info("📊 NASDAQ 100 companies: **~100 stocks**")
-        elif market_selection == "European Stocks":
-            st.info("📊 Major European indices: **~200 stocks**")
-        else:
-            st.info("📊 Custom symbol screening available")
-    
-    # Custom symbols input for Custom Symbols option
-    custom_symbols = None
-    if market_selection == "Custom Symbols":
-        custom_symbols = st.text_area(
-            "Enter Stock Symbols (comma-separated)",
-            placeholder="AAPL, MSFT, GOOGL, TSLA, NVDA",
-            help="Enter stock symbols separated by commas. Examples: AAPL, MSFT, GOOGL"
-        )
-    
-    # Run screening button
-    if st.button("🚀 Start Screening", type="primary"):
-        # Validation for custom symbols
-        if market_selection == "Custom Symbols" and not custom_symbols:
-            st.error("❌ Please enter stock symbols for custom screening")
-            return
+    try:
+        # Add NumPy compatibility setup for screener display
+        import warnings
+        import os
+        warnings.filterwarnings('ignore')
         
-        st.markdown("---")
+        # Ensure session state is properly initialized
+        if 'score_weights' not in st.session_state:
+            st.warning("⚠️ Session state not properly initialized. Initializing now...")
+            init_session_state()
+            st.success("✅ Session state initialized. You can now use the screener.")
         
-        # Aggressive cache clearing to avoid duplicate column issues
-        st.cache_data.clear()
-        st.cache_resource.clear()
+        st.header("🔍 Multi-Market Stock Screener")
+        st.markdown("Screen stocks from multiple markets using the comprehensive scoring system from Tab 1")
         
-        # Force Python to clear any cached modules
-        import importlib
-        import sys
-        for module_name in list(sys.modules.keys()):
-            if 'yfinance' in module_name or 'yahoo' in module_name:
-                if module_name in sys.modules:
-                    importlib.reload(sys.modules[module_name])
+        # Initialize session state for market screener settings
+        if 'screener_market_selection' not in st.session_state:
+            st.session_state.screener_market_selection = "Danish Stocks"
+        if 'screener_min_score' not in st.session_state:
+            st.session_state.screener_min_score = 5.0
+        if 'screener_max_stocks' not in st.session_state:
+            st.session_state.screener_max_stocks = 25
+        if 'screener_custom_symbols' not in st.session_state:
+            st.session_state.screener_custom_symbols = ""
+        if 'screening_in_progress' not in st.session_state:
+            st.session_state.screening_in_progress = False
+        if 'screening_results' not in st.session_state:
+            st.session_state.screening_results = None
         
-        screening_text = f"Screening {market_selection.lower()}... This may take a few minutes."
-        with st.spinner(screening_text):
-            results_df = screen_multi_market_stocks(market_selection, min_score, custom_symbols if market_selection == "Custom Symbols" else None)
+        # Configuration section
+        st.subheader("📋 Screening Configuration")
         
-        if not results_df.empty:
-            # Limit results
-            display_df = results_df.head(max_stocks)
+        # Market selection and configuration section
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+        
+        with col1:
+            options = ["Danish Stocks", "S&P 500", "NASDAQ 100", "European Stocks", "Custom Symbols"]
+            try:
+                current_index = options.index(st.session_state.screener_market_selection)
+            except ValueError:
+                current_index = 0  # Default to first option if current value not found
+                st.session_state.screener_market_selection = options[0]
             
-            # Additional safety check for duplicate columns
-            if len(display_df.columns) != len(set(display_df.columns)):
-                st.error("❌ Duplicate columns detected in results. Removing duplicates...")
-                display_df = display_df.loc[:, ~display_df.columns.duplicated()]
-                st.success(f"✅ Cleaned DataFrame now has {len(display_df.columns)} unique columns")
+            # Use on_change to update session state only when dropdown actually changes
+            def update_market_selection():
+                st.session_state.screener_market_selection = st.session_state.market_dropdown
             
-            st.success(f"✅ Found **{len(results_df)}** stocks from {market_selection} with score ≥ {min_score}")
+            market_selection = st.selectbox(
+                "Select Market",
+                options=options,
+                index=current_index,
+                help="Choose which market or stock universe to screen",
+                key="market_dropdown",
+                disabled=st.session_state.screening_in_progress,
+                on_change=update_market_selection
+            )
+        
+        with col2:
+            def update_min_score():
+                st.session_state.screener_min_score = st.session_state.score_slider
             
-            # Summary metrics
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                st.metric("Average Score", f"{results_df['Final_Score'].mean():.2f}")
-            with col2:
-                st.metric("Highest Score", f"{results_df['Final_Score'].max():.2f}")
-            with col3:
-                st.metric("Above 7.0", len(results_df[results_df['Final_Score'] >= 7.0]))
-            with col4:
-                st.metric("Above 8.0", len(results_df[results_df['Final_Score'] >= 8.0]))
-            with col5:
-                # Count Strong Buy and Buy recommendations
-                strong_buy_count = len(results_df[results_df['Recommendation'].str.contains('Strong Buy', na=False)])
-                buy_count = len(results_df[results_df['Recommendation'].str.contains('📈 Buy', na=False)])
-                st.metric("Buy Signals", strong_buy_count + buy_count)
+            min_score = st.slider(
+                "Minimum Score", 
+                min_value=0.0, 
+                max_value=10.0, 
+                value=st.session_state.screener_min_score, 
+                step=0.1,
+                help="Only show stocks with score above this threshold",
+                key="score_slider",
+                disabled=st.session_state.screening_in_progress,
+                on_change=update_min_score
+            )
+        
+        with col3:
+            def update_max_stocks():
+                st.session_state.screener_max_stocks = st.session_state.max_input
             
-            # Display results in tabs
-            result_tab1, result_tab2, result_tab3 = st.tabs(["📊 Results Overview", "📈 Detailed Scores", "💾 Export Data"])
+            max_stocks = st.number_input(
+                "Max Results", 
+                min_value=10, 
+                max_value=100, 
+                value=st.session_state.screener_max_stocks,
+                help="Maximum number of stocks to display",
+                key="max_input",
+                disabled=st.session_state.screening_in_progress,
+                on_change=update_max_stocks
+            )
+        
+        with col4:
+            # Dynamic info based on current market selection
+            if st.session_state.screener_market_selection == "Danish Stocks":
+                st.info(f"📊 Danish stocks: **{len(set(DANISH_STOCKS.values()))}**")
+            elif st.session_state.screener_market_selection == "S&P 500":
+                st.info("📊 S&P 500: **~500 stocks**")
+            elif st.session_state.screener_market_selection == "NASDAQ 100":
+                st.info("📊 NASDAQ 100: **~100 stocks**")
+            elif st.session_state.screener_market_selection == "European Stocks":
+                st.info("📊 European: **~200 stocks**")
+            else:
+                st.info("📊 Custom symbols")
+        
+        # Custom symbols input for Custom Symbols option
+        custom_symbols = None
+        if st.session_state.screener_market_selection == "Custom Symbols":
+            def update_custom_symbols():
+                st.session_state.screener_custom_symbols = st.session_state.symbols_input
             
-            with result_tab1:
-                st.subheader(f"Top {len(display_df)} Stocks from {market_selection}")
+            custom_symbols = st.text_area(
+                "Enter Stock Symbols (comma-separated)",
+                value=st.session_state.screener_custom_symbols,
+                placeholder="AAPL, MSFT, GOOGL, TSLA, NVDA",
+                help="Enter stock symbols separated by commas. Examples: AAPL, MSFT, GOOGL",
+                key="symbols_input",
+                disabled=st.session_state.screening_in_progress,
+                on_change=update_custom_symbols
+            )
+        
+        # Button controls
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            if not st.session_state.screening_in_progress:
+                if st.button("🚀 Start Screening", type="primary", use_container_width=True):
+                    # Validation for custom symbols
+                    if st.session_state.screener_market_selection == "Custom Symbols" and not st.session_state.screener_custom_symbols:
+                        st.error("❌ Please enter stock symbols for custom screening")
+                    else:
+                        st.session_state.screening_in_progress = True
+                        st.rerun()
+        
+        with col2:
+            if st.session_state.screening_in_progress:
+                if st.button("⏹️ Stop Screening", type="secondary", use_container_width=True):
+                    st.session_state.screening_in_progress = False
+                    st.session_state.screening_results = None
+                    st.rerun()
+        
+        with col3:
+            if st.session_state.screening_results is not None:
+                if st.button("🔄 Clear Results", type="secondary", use_container_width=True):
+                    st.session_state.screening_results = None
+                    st.rerun()
+        
+        # Execute screening if in progress
+        if st.session_state.screening_in_progress:
+            # Show progress indicator
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Perform screening
+            try:
+                status_text.text("🔍 Initializing screening...")
+                progress_bar.progress(20)
                 
-                # Main results table - dynamic columns based on market
-                if market_selection == "Danish Stocks":
-                    display_columns = [
-                        'Original_Symbol', 'Company', 'Final_Score', 'Recommendation', 'Sector', 
-                        'Current_Price', 'P/E_Ratio', 'ROE', 'Revenue_Growth', 'Dividend_Yield'
-                    ]
-                    price_label = 'Price (DKK)'
-                else:
-                    display_columns = [
-                        'Original_Symbol', 'Company', 'Final_Score', 'Recommendation', 'Market', 'Sector', 
-                        'Current_Price', 'P/E_Ratio', 'ROE', 'Revenue_Growth', 'Dividend_Yield'
-                    ]
-                    price_label = 'Price (USD)'
-                
-                st.dataframe(
-                    display_df[display_columns],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        'Final_Score': st.column_config.NumberColumn('Score', format="%.2f"),
-                        'Current_Price': st.column_config.NumberColumn(price_label, format="%.2f"),
-                        'P/E_Ratio': st.column_config.NumberColumn('P/E', format="%.1f"),
-                        'ROE': st.column_config.NumberColumn('ROE (%)', format="%.1f"),
-                        'Revenue_Growth': st.column_config.NumberColumn('Rev Growth (%)', format="%.1f"),
-                        'Dividend_Yield': st.column_config.NumberColumn('Div Yield (%)', format="%.2f"),
-                    }
+                # Use session state values for screening
+                screening_results = screen_multi_market_stocks(
+                    market_selection=st.session_state.screener_market_selection,
+                    min_score=st.session_state.screener_min_score,
+                    custom_symbols=st.session_state.screener_custom_symbols.split(',') if st.session_state.screener_custom_symbols else None
                 )
                 
-                # Sector breakdown
-                st.subheader("📊 Sector Distribution")
-                sector_counts = display_df['Sector'].value_counts()
-                col1, col2, col3 = st.columns([1, 1, 1])
+                progress_bar.progress(100)
+                status_text.text("✅ Screening completed!")
                 
-                with col1:
-                    fig_pie = px.pie(
-                        values=sector_counts.values, 
-                        names=sector_counts.index,
-                        title="Stocks by Sector"
-                    )
-                    st.plotly_chart(fig_pie, use_container_width=True)
+                # Store results and mark screening as complete
+                st.session_state.screening_results = screening_results
+                st.session_state.screening_in_progress = False
                 
-                with col2:
-                    # Score distribution
-                    fig_hist = px.histogram(
-                        display_df, 
-                        x='Final_Score', 
-                        nbins=10,
-                        title="Score Distribution"
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
+                # Clear progress indicators
+                progress_bar.empty()
+                status_text.empty()
                 
-                with col3:
-                    # Recommendation distribution
-                    rec_counts = display_df['Recommendation'].value_counts()
-                    fig_rec = px.pie(
-                        values=rec_counts.values,
-                        names=rec_counts.index,
-                        title="Recommendation Distribution"
-                    )
-                    st.plotly_chart(fig_rec, use_container_width=True)
-            
-            with result_tab2:
-                st.subheader("📈 Detailed Scoring Breakdown")
-                
-                # Show individual metric scores
-                score_columns = [col for col in display_df.columns if col.endswith('_Score') and col != 'Final_Score']
-                if score_columns:
-                    detailed_df = display_df[['Original_Symbol', 'Company', 'Final_Score'] + score_columns].copy()
-                    
-                    st.dataframe(
-                        detailed_df,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            col: st.column_config.NumberColumn(col.replace('_Score', ''), format="%.1f")
-                            for col in score_columns
-                        }
-                    )
-                    
-                    # Heatmap of scores - using scatter plot instead of imshow for NumPy compatibility
-                    if len(detailed_df) > 1:
-                        st.subheader("🎯 Scoring Heatmap")
-                        
-                        # Create a melted dataframe for the heatmap
-                        heatmap_data = detailed_df[['Original_Symbol'] + score_columns].melt(
-                            id_vars=['Original_Symbol'], 
-                            var_name='Metric', 
-                            value_name='Score'
-                        )
-                        
-                        try:
-                            # Use a scatter plot with size and color to represent scores
-                            fig_heatmap = px.scatter(
-                                heatmap_data,
-                                x='Metric',
-                                y='Original_Symbol',
-                                color='Score',
-                                size='Score',
-                                title="Individual Metric Scores by Stock",
-                                color_continuous_scale="RdYlGn",
-                                size_max=20
-                            )
-                            fig_heatmap.update_layout(height=600)
-                            fig_heatmap.update_xaxes(tickangle=45)
-                            st.plotly_chart(fig_heatmap, use_container_width=True)
-                        except Exception as e:
-                            st.info("📊 Score heatmap temporarily unavailable due to library compatibility")
-                            # Show a simple table instead
-                            st.dataframe(detailed_df[['Original_Symbol'] + score_columns], use_container_width=True)
-                
-                # Recommendation explanation
-                st.markdown("---")
-                st.subheader("🎯 Recommendation Guide")
-                
-                rec_explanation = {
-                    "🚀 Strong Buy": "Score ≥ 8.0 - Exceptional value with strong fundamentals",
-                    "📈 Buy": "Score ≥ 6.5 - Good investment opportunity with solid metrics", 
-                    "🔄 Hold": "Score ≥ 4.0 - Adequate performance, consider for portfolio balance",
-                    "📉 Weak Sell": "Score ≥ 2.0 - Below average performance, watch closely",
-                    "🛑 Strong Sell": "Score < 2.0 - Poor fundamentals, consider avoiding"
-                }
-                
-                for rec, explanation in rec_explanation.items():
-                    st.markdown(f"**{rec}**: {explanation}")
-            
-            with result_tab3:
-                st.subheader("💾 Export Screening Results")
-                
-                # Export options
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    csv_data = results_df.to_csv(index=False)
-                    st.download_button(
-                        "📥 Download Full Results (CSV)",
-                        data=csv_data,
-                        file_name=f"{market_selection.lower().replace(' ', '_')}_screening_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-                
-                with col2:
-                    symbols_list = ", ".join(display_df['Original_Symbol'].tolist())
-                    st.text_area(
-                        "📋 Top Stock Symbols (Copy)",
-                        value=symbols_list,
-                        height=100
-                    )
-                
-                # Summary statistics
-                st.subheader("📊 Summary Statistics")
-                selected_symbols = get_stock_symbols_for_market(market_selection, custom_symbols)
-                summary_stats = {
-                    'Total Stocks Screened': len(selected_symbols),
-                    'Stocks Meeting Criteria': len(results_df),
-                    'Average Score': f"{results_df['Final_Score'].mean():.2f}",
-                    'Median Score': f"{results_df['Final_Score'].median():.2f}",
-                    'Standard Deviation': f"{results_df['Final_Score'].std():.2f}",
-                    'Highest Scoring Stock': f"{results_df.iloc[0]['Original_Symbol']} ({results_df.iloc[0]['Final_Score']:.2f})",
-                    'Most Common Sector': results_df['Sector'].mode().iloc[0] if not results_df['Sector'].mode().empty else 'N/A'
-                }
-                
-                stats_df = pd.DataFrame(list(summary_stats.items()), columns=['Metric', 'Value'])
-                st.dataframe(stats_df, hide_index=True, use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ Error during screening: {str(e)}")
+                st.session_state.screening_in_progress = False
+                progress_bar.empty()
+                status_text.empty()
         
-        else:
-            st.warning(f"❌ No stocks found with score ≥ {min_score} in {market_selection}")
-            st.info("Try lowering the minimum score threshold or check if the scoring system is working correctly.")
+        # Display results if available
+        if st.session_state.screening_results is not None:
+            if not st.session_state.screening_results.empty:
+                display_screening_results(
+                    st.session_state.screening_results, 
+                    st.session_state.screener_market_selection, 
+                    st.session_state.screener_min_score,
+                    st.session_state.screener_max_stocks
+                )
+            else:
+                st.warning("⚠️ No stocks found matching your criteria. Try lowering the minimum score threshold.")
+        elif not st.session_state.screening_in_progress:
+            # Show current configuration when not screening
+            st.info(f"**Current Configuration:** {st.session_state.screener_market_selection} | "
+                   f"Min Score: {st.session_state.screener_min_score} | "
+                   f"Max Results: {st.session_state.screener_max_stocks}")
     
-    # Information section
-    st.markdown("---")
-    st.markdown("""
-    ### ℹ️ How the Multi-Market Screening Works
-    
-    **📊 Scoring System**: Uses the same comprehensive scoring from Tab 1, including:
-    - Financial ratios (P/E, PEG, P/B, ROE, etc.)
-    - Growth metrics (Revenue, EPS growth)
-    - Profitability indicators
-    - Debt and dividend metrics
-    - Sector-specific adjustments
-    
-    **� Market Options**: 
-    - **Danish Stocks**: All major Danish stocks with .CO suffix handling
-    - **S&P 500**: Top US large-cap stocks
-    - **NASDAQ 100**: Technology-focused US stocks  
-    - **European Stocks**: Major European companies
-    - **Custom Symbols**: Enter your own comma-separated stock symbols
-    
-    **⚖️ Weight Adjustments**: Uses your custom weights from the sidebar configuration
-    
-    **🔄 Real-time Data**: Fetches live data from Yahoo Finance for accurate analysis
-    """)
+    except Exception as screener_error:
+        st.error(f"❌ Error in market screener: {str(screener_error)}")
+        st.info("🔄 Try refreshing the page or contact support if the issue persists.")
 
+def display_screening_results(results_df, market_selection, min_score, max_stocks=50):
+    """
+    Display the screening results in a nicely formatted way
+    """
+    if results_df is not None and not results_df.empty:
+        # Limit results to max_stocks
+        display_df = results_df.head(max_stocks)
+        st.success(f"✅ Found **{len(results_df)}** stocks from {market_selection} with score ≥ {min_score}")
+        
+        if len(results_df) > max_stocks:
+            st.info(f"📊 Showing top **{max_stocks}** results (out of {len(results_df)} total)")
+        
+        # Main results table
+        st.subheader(f"🏆 Top {len(display_df)} Stocks from {market_selection}")
+        
+        display_columns = [
+            'Original_Symbol', 'Company', 'Final_Score', 'Recommendation', 'Sector', 
+            'Current_Price', 'P/E_Ratio', 'ROE', 'Revenue_Growth', 'Dividend_Yield'
+        ]
+        
+        # Filter columns that exist in the dataframe
+        available_columns = [col for col in display_columns if col in display_df.columns]
+        
+        st.dataframe(
+            display_df[available_columns],
+            use_container_width=True,
+            hide_index=True
+        )
 def display_company_search():
     """Display company search interface"""
     st.subheader("🔍 Company Name Search")
