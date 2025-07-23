@@ -10,6 +10,8 @@ import json
 import numpy as np
 import io
 import os
+import sys
+import traceback
 from plotly.subplots import make_subplots
 import warnings
 import base64
@@ -49,9 +51,6 @@ try:
     
 except Exception:
     pass
-
-# Enhanced Features Integration
-ENHANCED_FEATURES_AVAILABLE = True  # Enable enhanced features by default
 
 # Page configuration
 st.set_page_config(layout="wide", page_title="AS System v6 - Enhanced")
@@ -245,10 +244,14 @@ class AdvancedRiskAnalyzer:
         return {col: returns[col].std() * np.sqrt(252) for col in returns.columns}
     
     def calculate_var(self, returns, confidence=0.95):
-        """Calculate Value at Risk"""
+        """Calculate Value at Risk with proper implementation"""
         if len(returns) == 0:
             return 0
-        return np.percentile(returns, (1 - confidence) * 100)
+        
+        # Calculate VaR using historical simulation
+        sorted_returns = np.sort(returns)
+        index = int((1 - confidence) * len(sorted_returns))
+        return sorted_returns[index] if index < len(sorted_returns) else 0
     
     def calculate_expected_shortfall(self, returns, confidence=0.95):
         """Calculate Expected Shortfall (Conditional VaR)"""
@@ -310,104 +313,16 @@ class AdvancedRiskAnalyzer:
             if returns.empty or len(returns) < 2:
                 return pd.DataFrame()
             
-            # Import numpy with explicit alias setup to avoid deprecation issues
-            import numpy
+            # Simple, robust correlation calculation
+            correlation_matrix = returns.corr()
             
-            # Set up comprehensive warning suppression at the most global level
-            import warnings
-            import os
-            import sys
+            # Fill any NaN values with 0
+            correlation_matrix = correlation_matrix.fillna(0)
             
-            # Environment variables to suppress NumPy warnings at the lowest level
-            os.environ['PYTHONWARNINGS'] = 'ignore'
-            os.environ['NUMPY_HIDE_WARNINGS'] = '1'
-            
-            # Add to sys.modules to prevent numpy bool import issues
-            if not hasattr(numpy, 'bool'):
-                numpy.bool = bool
-            if not hasattr(numpy, 'int'):
-                numpy.int = int  
-            if not hasattr(numpy, 'float'):
-                numpy.float = float
-            if not hasattr(numpy, 'complex'):
-                numpy.complex = complex
-            
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                warnings.filterwarnings("ignore")
-                warnings.filterwarnings("ignore", category=Warning)
-                warnings.filterwarnings("ignore", category=DeprecationWarning)
-                warnings.filterwarnings("ignore", category=FutureWarning)
-                warnings.filterwarnings("ignore", category=UserWarning)
-                warnings.filterwarnings("ignore", message=".*bool.*")
-                warnings.filterwarnings("ignore", message=".*numpy.*")
-                
-                # Create clean copy of data
-                returns_clean = returns.copy()
-                
-                # Convert all data to proper numeric types without using NumPy aliases
-                for col in returns_clean.columns:
-                    if returns_clean[col].dtype == 'object':
-                        returns_clean[col] = pd.to_numeric(returns_clean[col], errors='coerce')
-                
-                # Drop columns that are all NaN
-                returns_clean = returns_clean.dropna(axis=1, how='all')
-                
-                if returns_clean.empty or len(returns_clean.columns) < 2:
-                    return pd.DataFrame()
-                
-                # Ensure we have only numeric columns with explicit Python types
-                numeric_data = pd.DataFrame()
-                for col in returns_clean.columns:
-                    try:
-                        # Convert to float64 explicitly to avoid any NumPy type issues
-                        series_data = returns_clean[col].astype('float64')
-                        if not series_data.isna().all():
-                            numeric_data[col] = series_data
-                    except (ValueError, TypeError):
-                        continue
-                
-                if numeric_data.empty or len(numeric_data.columns) < 2:
-                    return pd.DataFrame()
-                
-                # Calculate correlation using manual method to avoid pandas/numpy compatibility issues
-                try:
-                    # Method 1: Try pandas corr with maximum error suppression
-                    correlation_matrix = None
-                    
-                    # Suppress warnings at the numpy level
-                    old_settings = numpy.seterr(all='ignore')
-                    
-                    try:
-                        correlation_matrix = numeric_data.corr(method='pearson', min_periods=1)
-                    except Exception:
-                        try:
-                            # Method 2: Manual correlation calculation
-                            correlation_matrix = self._manual_correlation_calculation(numeric_data)
-                        except Exception:
-                            correlation_matrix = pd.DataFrame()
-                    finally:
-                        # Restore numpy error settings
-                        numpy.seterr(**old_settings)
-                    
-                    if correlation_matrix is not None and not correlation_matrix.empty:
-                        # Ensure proper data types and handle NaN values
-                        correlation_matrix = correlation_matrix.fillna(0.0)
-                        
-                        # Convert to standard Python float type
-                        correlation_matrix = correlation_matrix.astype('float64')
-                        
-                        # Validate correlation matrix properties
-                        if correlation_matrix.shape[0] > 0 and correlation_matrix.shape[1] > 0:
-                            return correlation_matrix
-                
-                except Exception:
-                    pass
-                
-                return pd.DataFrame()
+            return correlation_matrix
             
         except Exception as e:
-            # Return empty DataFrame silently to avoid cluttering the UI
+            st.warning(f"Correlation calculation failed: {e}")
             return pd.DataFrame()
     
     def _manual_correlation_calculation(self, data):
@@ -819,9 +734,8 @@ class PortfolioCloudManager:
             }
         }
         
-        # Get enhanced portfolio data if available
-        if (st.session_state.get('enhanced_features_enabled', False) and 
-            st.session_state.get('enhanced_features_manager') and
+        # Get enhanced portfolio data
+        if (st.session_state.get('enhanced_features_manager') and
             st.session_state.enhanced_features_manager.portfolio_db):
             
             try:
@@ -1046,9 +960,8 @@ class PortfolioCloudManager:
                 if session_data.get("portfolio_holdings"):
                     st.session_state.portfolio_holdings = session_data["portfolio_holdings"]
             
-            # Restore enhanced portfolio data if enhanced features are enabled
-            if (st.session_state.get('enhanced_features_enabled', False) and 
-                st.session_state.get('enhanced_features_manager') and
+            # Restore enhanced portfolio data (enhanced-only mode)
+            if (st.session_state.get('enhanced_features_manager') and
                 "enhanced_portfolio" in backup_data["portfolio"]):
                 
                 enhanced_data = backup_data["portfolio"]["enhanced_portfolio"]
@@ -1233,7 +1146,7 @@ class PortfolioCloudManager:
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("✅ I Understand - Don't Show Again"):
+            if st.button("✅ I Understand - Don't Show Again", key="dismiss_backup_warning"):
                 st.session_state.backup_warnings_shown = True
                 st.rerun()
         
@@ -1292,7 +1205,7 @@ class PortfolioCloudManager:
             on_change=update_backup_format
         )
         
-        if st.button("📥 Generate Backup", type="primary"):
+        if st.button("📥 Generate Backup", type="primary", key="generate_backup_main"):
             with st.spinner("Creating backup..."):
                 content, filename, mime_type = self.generate_downloadable_backup(backup_format)
                 if content:
@@ -1760,6 +1673,7 @@ class PortfolioDatabase:
             'date': [date]
         })
         self.transactions = pd.concat([self.transactions, new_transaction], ignore_index=True)
+        return True
     
     def remove_holding(self, symbol):
         """Remove a holding from the portfolio"""
@@ -1776,6 +1690,7 @@ class PortfolioDatabase:
             self.transactions = pd.concat([self.transactions, new_transaction], ignore_index=True)
         
         self.holdings = self.holdings[self.holdings['symbol'] != symbol]
+        return True
     
     def update_holding(self, symbol, quantity=None, price=None):
         """Update an existing holding"""
@@ -1788,6 +1703,17 @@ class PortfolioDatabase:
     def get_current_holdings(self):
         """Get current portfolio holdings"""
         return self.holdings.copy()
+    
+    def get_portfolio(self):
+        """Get portfolio in expected format for compatibility"""
+        portfolio_dict = {}
+        for _, holding in self.holdings.iterrows():
+            portfolio_dict[holding['symbol']] = {
+                'quantity': holding['quantity'],
+                'purchase_price': holding['average_cost'],
+                'purchase_date': holding['purchase_date']
+            }
+        return portfolio_dict
     
     def get_transaction_history(self):
         """Get transaction history"""
@@ -1821,6 +1747,44 @@ class PortfolioDatabase:
                 # Fallback to cost basis if current price unavailable
                 total_value += holding['quantity'] * holding['average_cost']
         return total_value
+    
+    def get_portfolio_snapshots(self, limit=30):
+        """Get portfolio snapshots for historical tracking"""
+        # For now, return current portfolio as a single snapshot
+        # In a full implementation, this would track historical snapshots
+        current_holdings = self.get_current_holdings()
+        if not current_holdings.empty:
+            snapshot = {
+                'date': datetime.now().strftime('%Y-%m-%d'),
+                'total_value': self.get_total_value(),
+                'holdings_count': len(current_holdings),
+                'holdings': current_holdings.to_dict('records')
+            }
+            return [snapshot]
+        return []
+    
+    def record_transaction(self, symbol, action, quantity, price, date=None, notes=None):
+        """Record a transaction manually"""
+        if date is None:
+            date = datetime.now().strftime('%Y-%m-%d')
+        
+        transaction_data = {
+            'symbol': [symbol],
+            'action': [action],
+            'quantity': [quantity],
+            'price': [price],
+            'date': [date]
+        }
+        
+        # Add notes column if not exists
+        if 'notes' not in self.transactions.columns:
+            self.transactions['notes'] = ''
+        
+        transaction_data['notes'] = [notes or '']
+        
+        new_transaction = pd.DataFrame(transaction_data)
+        self.transactions = pd.concat([self.transactions, new_transaction], ignore_index=True)
+        return True
 
 class EnhancedFeaturesManager:
     """Manager for all enhanced portfolio features"""
@@ -1890,55 +1854,40 @@ def init_session_state():
     
     # Initialize portfolio if it doesn't exist
     if "portfolio" not in st.session_state:
-        st.session_state.portfolio = []
+        safe_session_state_set("portfolio", [])
     
     # Initialize portfolio holdings with purchase prices if not exists
     if "portfolio_holdings" not in st.session_state:
-        st.session_state.portfolio_holdings = {}  # Format: {symbol: {"quantity": float, "purchase_price": float, "purchase_date": str}}
+        safe_session_state_set("portfolio_holdings", {})  # Format: {symbol: {"quantity": float, "purchase_price": float, "purchase_date": str}}
     
     # Initialize stock analysis data cache
     if "stock_data" not in st.session_state:
-        st.session_state.stock_data = {}  # Format: {symbol: {"final_score": float, "recommendation": str, ...}}
+        safe_session_state_set("stock_data", {})  # Format: {symbol: {"final_score": float, "recommendation": str, ...}}
     
     # Migrate old portfolio format to new format if needed
-    if st.session_state.portfolio and not st.session_state.portfolio_holdings:
+    portfolio = safe_session_state_get("portfolio", [])
+    portfolio_holdings = safe_session_state_get("portfolio_holdings", {})
+    
+    if portfolio and not portfolio_holdings:
         # Migrate existing portfolio symbols to new format (without purchase prices initially)
-        for symbol in st.session_state.portfolio:
-            if symbol not in st.session_state.portfolio_holdings:
-                st.session_state.portfolio_holdings[symbol] = {
+        for symbol in portfolio:
+            if symbol not in portfolio_holdings:
+                portfolio_holdings[symbol] = {
                     "quantity": 1.0,
                     "purchase_price": 0.0,  # Will need to be updated by user
                     "purchase_date": datetime.now().strftime("%Y-%m-%d")
                 }
+        safe_session_state_set("portfolio_holdings", portfolio_holdings)
     
-    # Initialize Enhanced Features Manager
-    if ENHANCED_FEATURES_AVAILABLE:
-        # Only initialize if not already done or if it failed
-        if "enhanced_features_manager" not in st.session_state or st.session_state.enhanced_features_manager is None:
-            try:
-                st.session_state.enhanced_features_manager = EnhancedFeaturesManager()
-                # Initialize the enhanced features
-                st.session_state.enhanced_features_manager.initialize_all_systems()
-                st.session_state.enhanced_features_enabled = True
-                st.session_state.enhanced_features_init_attempted = True
-            except Exception as e:
-                st.warning(f"⚠️ Could not initialize enhanced features: {e}")
-                st.session_state.enhanced_features_enabled = False
-                st.session_state.enhanced_features_manager = None
-                st.session_state.enhanced_features_init_attempted = True
-        else:
-            # Enhanced features manager exists, make sure it's enabled
-            if not st.session_state.get('enhanced_features_enabled', False):
-                # Try to re-enable if the manager exists but was disabled
-                if st.session_state.enhanced_features_manager is not None:
-                    try:
-                        # Test if the manager is still working
-                        if hasattr(st.session_state.enhanced_features_manager, 'portfolio_db'):
-                            st.session_state.enhanced_features_enabled = True
-                    except Exception:
-                        st.session_state.enhanced_features_enabled = False
-    else:
-        st.session_state.enhanced_features_enabled = False
+    # Initialize Enhanced Features Manager (Always enabled)
+    if "enhanced_features_manager" not in st.session_state or st.session_state.enhanced_features_manager is None:
+        try:
+            st.session_state.enhanced_features_manager = EnhancedFeaturesManager()
+            st.session_state.enhanced_features_manager.initialize_all_systems()
+        except Exception as e:
+            st.error(f"❌ System initialization failed: {str(e)}")
+            st.info("Please refresh the page. If the problem persists, contact support.")
+            st.stop()
 
 # Portfolio sync functions
 def save_portfolio_to_file():
@@ -2066,7 +2015,7 @@ def update_danish_stocks_list():
     with col1:
         st.write(f"Current Danish stocks in database: **{len(DANISH_STOCKS)}**")
         
-        if st.button("🔍 Discover Additional Danish Stocks", help="This will search for more Danish stocks and validate them"):
+        if st.button("🔍 Discover Additional Danish Stocks", key="discover_danish_stocks", help="This will search for more Danish stocks and validate them"):
             with st.spinner("Discovering Danish stocks..."):
                 discovered = discover_danish_stocks()
                 
@@ -2084,7 +2033,7 @@ def update_danish_stocks_list():
                     st.info(f"Updated total: {len(DANISH_STOCKS)} Danish stocks")
                     
                     # Offer to save the updated list
-                    if st.button("💾 Save Updated List to File"):
+                    if st.button("💾 Save Updated List to File", key="save_danish_list"):
                         updated_code = generate_danish_stocks_code(DANISH_STOCKS)
                         
                         # Save to a file
@@ -2103,7 +2052,7 @@ def update_danish_stocks_list():
     with col2:
         st.metric("Total Danish Stocks", len(DANISH_STOCKS))
         
-        if st.button("📋 View Current List"):
+        if st.button("📋 View Current List", key="view_danish_list"):
             st.subheader("Current Danish Stocks")
             
             # Create a nice display of current stocks
@@ -2376,6 +2325,130 @@ def get_3year_price_performance(symbol):
     except Exception as e:
         st.error(f"Error fetching price performance for {symbol}: {e}")
         return {}
+
+# Error handling decorator for consistent error management
+def with_error_handling(func):
+    """Decorator for consistent error handling"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            st.warning(f"Function {func.__name__} failed: {e}")
+            return None
+    return wrapper
+
+def safe_session_state_get(key, default_value):
+    """Safely get value from session state"""
+    return st.session_state.get(key, default_value)
+
+def safe_session_state_set(key, value):
+    """Safely set value in session state"""
+    try:
+        st.session_state[key] = value
+        return True
+    except Exception as e:
+        st.warning(f"Failed to set session state {key}: {e}")
+        return False
+
+# Missing utility functions - CRITICAL FIX
+def safe_float(value, default=0):
+    """Safely convert value to float with fallback"""
+    try:
+        if value is None or value == '' or str(value).lower() in ['n/a', 'nan', 'none']:
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+def safe_comparison(value1, operator, value2):
+    """Safely compare values with None handling"""
+    try:
+        v1 = safe_float(value1, 0)
+        v2 = safe_float(value2, 0)
+        if operator == '>':
+            return v1 > v2
+        elif operator == '<':
+            return v1 < v2
+        elif operator == '>=':
+            return v1 >= v2
+        elif operator == '<=':
+            return v1 <= v2
+        elif operator == '==':
+            return v1 == v2
+        return False
+    except:
+        return False
+
+def get_financial_health_data(info):
+    """Extract financial health data safely"""
+    return {
+        'current_ratio': safe_float(info.get('currentRatio'), 1.0),
+        'interest_coverage': safe_float(info.get('interestCoverage'), 5.0),
+        'cash_position': safe_float(info.get('totalCash'), 0),
+        'total_debt': safe_float(info.get('totalDebt'), 0)
+    }
+
+def get_industry_pe(info):
+    """Get industry PE with safe fallback"""
+    return safe_float(info.get('industryPE'), 20.0)
+
+def get_industry_benchmarks(sector):
+    """Get industry benchmarks with safe defaults"""
+    # Default benchmarks for unknown sectors
+    default_benchmarks = {
+        "roe": 15.0,
+        "gross_margin": 35.0,
+        "revenue_growth": 10.0,
+        "debt_equity": 50.0,
+        "current_ratio": 2.0,
+        "interest_coverage": 8.0
+    }
+    
+    # Sector-specific benchmarks
+    sector_benchmarks = {
+        "Technology": {
+            "roe": 20.0,
+            "gross_margin": 60.0,
+            "revenue_growth": 15.0,
+            "debt_equity": 30.0,
+            "current_ratio": 2.5,
+            "interest_coverage": 15.0
+        },
+        "Healthcare": {
+            "roe": 18.0,
+            "gross_margin": 70.0,
+            "revenue_growth": 12.0,
+            "debt_equity": 40.0,
+            "current_ratio": 2.2,
+            "interest_coverage": 12.0
+        },
+        "Financials": {
+            "roe": 12.0,
+            "gross_margin": 25.0,
+            "revenue_growth": 8.0,
+            "debt_equity": 200.0,  # Banks have higher debt ratios
+            "current_ratio": 1.1,
+            "interest_coverage": 3.0
+        },
+        "Utilities": {
+            "roe": 10.0,
+            "gross_margin": 30.0,
+            "revenue_growth": 5.0,
+            "debt_equity": 80.0,
+            "current_ratio": 1.5,
+            "interest_coverage": 4.0
+        },
+        "Energy": {
+            "roe": 8.0,
+            "gross_margin": 25.0,
+            "revenue_growth": 6.0,
+            "debt_equity": 60.0,
+            "current_ratio": 1.8,
+            "interest_coverage": 6.0
+        }
+    }
+    
+    return sector_benchmarks.get(sector, default_benchmarks)
 
 # Enhanced scoring functions
 def score_pe(pe, industry_pe, allow_neutral=True):
@@ -4997,7 +5070,7 @@ def display_danish_stocks_screener(key_prefix=""):
         
         with col3:
             if st.session_state.screening_results is not None:
-                if st.button("🔄 Clear Results", type="secondary", use_container_width=True):
+                if st.button("🔄 Clear Results", type="secondary", use_container_width=True, key="clear_results_screener"):
                     st.session_state.screening_results = None
                     st.rerun()
         
@@ -5176,11 +5249,11 @@ def display_company_search():
                                        value=symbols_text, height=100, key="selected_display")
                         
                         with col2:
-                            if st.button("Clear Selection"):
+                            if st.button("Clear Selection", key="clear_selection_screener"):
                                 st.session_state.selected_symbols = []
                                 st.rerun()
                             
-                            if st.button("Copy to Clipboard", help="Use browser's copy function"):
+                            if st.button("Copy to Clipboard", key="copy_clipboard_screener", help="Use browser's copy function"):
                                 st.info("Please select and copy the text above")
                 
                 else:
@@ -5673,6 +5746,7 @@ def fetch_price(symbol):
         return None
 
 @st.cache_data(ttl=3600)
+@with_error_handling
 def fetch_yahoo_info(symbol):
     """Enhanced Yahoo Finance data fetching with Danish stock support"""
     def try_fetch_symbol(sym):
@@ -7089,7 +7163,7 @@ def create_performance_dashboard():
         benchmark_symbol = benchmark_options[benchmark]
     
     # Run backtest button
-    if st.button("🚀 Run Historical Backtest", type="primary"):
+    if st.button("🚀 Run Historical Backtest", type="primary", key="run_historical_backtest"):
         # Validate inputs
         if start_date >= end_date:
             st.error("Start date must be before end date")
@@ -8832,34 +8906,7 @@ def main():
     )
     st.title("📈 Advanced Stock Scoring System")
     st.markdown("Analyze stocks using multiple financial metrics with AI-powered scoring")
-    
-    # ⚠️ CRITICAL: Display data persistence warnings for Streamlit Cloud
-    if not st.session_state.get("backup_warnings_shown", False):
-        st.error("""
-        🚨 **CRITICAL DATA PERSISTENCE WARNING - STREAMLIT CLOUD**
         
-        **Your data is temporary and WILL BE LOST when:**
-        • App restarts (daily automatic restarts)
-        • 30+ minutes of inactivity
-        • Browser refresh/closure
-        • App redeployment
-        
-        **🔐 PROTECT YOUR DATA:** Use backup features in Portfolio Manager!
-        """)
-        
-        col1, col2, col3 = st.columns([1, 1, 2])
-        with col1:
-            if st.button("✅ I Understand", type="primary"):
-                st.session_state.backup_warnings_shown = True
-                st.rerun()
-        
-        with col2:
-            if st.button("💾 Quick Backup"):
-                # Navigate to portfolio tab with backup interface
-                st.info("💡 Go to Portfolio Manager → Backup & Settings tab to backup your data")
-        
-        st.markdown("---")
-
     # Sidebar configuration
     with st.sidebar:
         st.header("Configuration")
@@ -8888,69 +8935,44 @@ def main():
                     on_change=create_weight_updater(metric, weight_key)
                 )
             
-            if st.button("Apply New Weights"):
+            if st.button("Apply New Weights", key="apply_new_weights"):
                 st.session_state.score_weights.update(new_weights)
                 st.success("Weights updated!")
         st.subheader("Current Weights")
         weights_df = pd.DataFrame(list(st.session_state.score_weights.items()), columns=['Metric', 'Weight'])
         st.dataframe(weights_df, hide_index=True)
         
-        # Enhanced Features Status
+        # System Status
         st.markdown("---")
-        st.subheader("🚀 Enhanced Features")
+        st.subheader("⚙️ System Status")
         
-        if st.session_state.get('enhanced_features_enabled', False):
-            st.success("✅ Enhanced Features Active")
+        enhanced_manager = st.session_state.enhanced_features_manager
+        
+        system_status = {
+            "🗄️ Portfolio Database": "✅" if enhanced_manager and enhanced_manager.portfolio_db else "❌",
+            "� What-If Analysis": "✅" if enhanced_manager and enhanced_manager.what_if_analyzer else "❌",
+            "� Advanced Analytics": "✅" if enhanced_manager else "❌"
+        }
+        
+        for feature, status in system_status.items():
+            st.write(f"{feature}: {status}")
             
-            # Show feature status
-            enhanced_manager = st.session_state.enhanced_features_manager
-            
-            features_status = {
-                "🗄️ SQLite Database": "✅" if enhanced_manager.portfolio_db else "❌",
-                "🚀 Advanced Caching": "✅" if enhanced_manager.cache else "❌", 
-                "⚡ Async Loading": "✅" if enhanced_manager.async_loader else "❌",
-                "🔮 What-If Analysis": "✅" if enhanced_manager.what_if_analyzer else "❌"
-            }
-            
-            for feature, status in features_status.items():
-                st.write(f"{feature}: {status}")
-                
-            # System stats
-            if enhanced_manager.portfolio_db:
-                holdings_count = len(enhanced_manager.portfolio_db.get_current_holdings())
-                transactions_count = len(enhanced_manager.portfolio_db.get_transaction_history())
-                st.metric("Portfolio Holdings", holdings_count)
-                st.metric("Total Transactions", transactions_count)
-        else:
-            st.warning("⚠️ Enhanced Features Disabled")
-            st.info("Running in basic mode. Enhanced features include:\n"
-                   "• SQLite Portfolio Database\n"
-                   "• Advanced Caching\n" 
-                   "• Async Data Loading\n"
-                   "• What-If Analysis")
-            
-            if st.button("🔄 Retry Enhanced Features"):
-                st.rerun()
+        # System stats
+        if enhanced_manager and enhanced_manager.portfolio_db:
+            holdings_count = len(enhanced_manager.portfolio_db.get_current_holdings())
+            transactions_count = len(enhanced_manager.portfolio_db.get_transaction_history())
+            st.metric("Portfolio Holdings", holdings_count)
+            st.metric("Total Transactions", transactions_count)
 
-    # Main tabs - Streamlined 6-tab structure for cleaner UI
-    if st.session_state.get('enhanced_features_enabled', False):
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📊 Stock Analysis & Research",  # Combined: Stock Analysis Hub + Trading Signals + Compare & Export
-            "🔍 Market Intelligence",        # Combined: Market Screeners + Danish Stocks focus
-            "� Portfolio Command Center",   # Combined: Enhanced Portfolio + Performance Benchmarking + What-If Analysis
-            "🚨 Monitoring & Alerts",       # Dedicated: Automated Monitoring (kept separate as critical)
-            "⚙️ Settings & Help",          # Combined: Help & Documentation + Settings
-            "🚀 Advanced Tools"             # New: Advanced features and experimental tools
-        ])
-    else:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📊 Stock Analysis & Research",  # Combined: Stock Analysis Hub + Trading Signals + Compare & Export
-            "🔍 Market Intelligence",        # Combined: Market Screeners + Danish Stocks focus  
-            "💼 Portfolio Command Center",   # Combined: Portfolio Manager + Performance Benchmarking
-            "🚨 Monitoring & Alerts",       # Dedicated: Automated Monitoring (kept separate as critical)
-            "⚙️ Settings & Help",          # Combined: Help & Documentation + Settings
-            "🚀 Advanced Tools"             # New: Advanced features and experimental tools
-        ])
+    # Main tabs - Unified structure with all advanced features
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Stock Analysis & Research",  # Combined: Stock Analysis Hub + Trading Signals + Compare & Export
+        "🔍 Market Intelligence",        # Combined: Market Screeners + Danish Stocks focus
+        "💼 Portfolio Command Center",   # Combined: Enhanced Portfolio + Performance Benchmarking + What-If Analysis
+        "🚨 Monitoring & Alerts",       # Dedicated: Automated Monitoring (kept separate as critical)
+        "⚙️ Settings & Help",          # Combined: Help & Documentation + Settings
+        "🚀 Advanced Tools"             # New: Advanced features and experimental tools
+    ])
 
     # --- Tab 1: Stock Analysis & Research (Combined Hub) ---
     with tab1:
@@ -9452,8 +9474,8 @@ def main():
             - Diversify your portfolio
             """)
 
-    # --- Market Screeners (combines Danish Stocks + Multi-Market Screener) ---
-    with tab3:
+        # Market Screeners section within Tab 2
+        st.markdown("---")
         st.header("🔍 Market Screeners")
         st.markdown("Screen stocks from Danish markets and global exchanges")
         
@@ -9544,46 +9566,41 @@ def main():
 
     # --- Portfolio Manager ---
     with tab4:
-        if st.session_state.get('enhanced_features_enabled', False):
-            st.header("💼 Enhanced Portfolio Manager")
-            st.markdown("🚀 **Enterprise-grade portfolio management with SQLite database, intelligent caching, and async loading**")
-            
-            # Enhanced Portfolio Manager Interface
-            enhanced_manager = st.session_state.enhanced_features_manager
-            
-            # Status indicators
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                db_status = "🟢 Connected" if enhanced_manager.portfolio_db else "🔴 Disconnected"
-                st.metric("Database", db_status)
-            
-            with col2:
-                cache_status = "🟢 Active" if enhanced_manager.cache else "🔴 Inactive"
-                st.metric("Cache System", cache_status)
-            
-            with col3:
-                async_status = "🟢 Ready" if enhanced_manager.async_loader else "🔴 Not Ready"
-                st.metric("Async Loading", async_status)
-            
-            with col4:
-                total_holdings = len(enhanced_manager.portfolio_db.get_current_holdings()) if enhanced_manager.portfolio_db else 0
-                st.metric("Total Holdings", total_holdings)
-            
-            # Enhanced Portfolio Tabs - Streamlined with all features
-            portfolio_tab1, portfolio_tab2, portfolio_tab3, portfolio_tab4, portfolio_tab5, portfolio_tab6 = st.tabs([
-                "📊 Portfolio Dashboard",
-                "➕ Manage Holdings", 
-                "📈 Portfolio Alerts",
-                "🔄 Portfolio Rebalancing",
-                "🔍 Weekly Market Screener",
-                "💾 Backup & Settings"
-            ])
-            
-            # Display cloud persistence warnings at the top level
-            if not st.session_state.get("backup_warnings_shown", False):
-                st.session_state.cloud_backup_manager.display_cloud_persistence_warnings()
-            
-            with portfolio_tab1:
+        st.header("💼 Portfolio Command Center")
+        st.markdown("🚀 **Enterprise-grade portfolio management with SQLite database, intelligent caching, and async loading**")
+        
+        # Portfolio Manager Interface
+        enhanced_manager = st.session_state.enhanced_features_manager
+        
+        # Status indicators
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            db_status = "🟢 Connected" if enhanced_manager.portfolio_db else "🔴 Disconnected"
+            st.metric("Database", db_status)
+        
+        with col2:
+            cache_status = "🟢 Active" if enhanced_manager.cache else "🔴 Inactive"
+            st.metric("Cache System", cache_status)
+        
+        with col3:
+            async_status = "🟢 Ready" if enhanced_manager.async_loader else "🔴 Not Ready"
+            st.metric("Async Loading", async_status)
+        
+        with col4:
+            total_holdings = len(enhanced_manager.portfolio_db.get_current_holdings()) if enhanced_manager.portfolio_db else 0
+            st.metric("Total Holdings", total_holdings)
+        
+        # Enhanced Portfolio Tabs - Streamlined with all features
+        portfolio_tab1, portfolio_tab2, portfolio_tab3, portfolio_tab4, portfolio_tab5, portfolio_tab6 = st.tabs([
+            "📊 Portfolio Dashboard",
+            "➕ Manage Holdings", 
+            "📈 Portfolio Alerts",
+            "🔄 Portfolio Rebalancing",
+            "🔍 Weekly Market Screener",
+            "💾 Backup & Settings"
+        ])
+        
+        with portfolio_tab1:
                 st.subheader("📊 Portfolio Dashboard")
                 
                 if enhanced_manager.portfolio_db:
@@ -9598,7 +9615,7 @@ def main():
                         col1, col2, col3 = st.columns(3)
                         
                         with col1:
-                            if st.button("Add Tech Giants", type="primary"):
+                            if st.button("Add Tech Giants", type="primary", key="add_tech_giants"):
                                 try:
                                     tech_stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
                                     for symbol in tech_stocks:
@@ -9717,8 +9734,6 @@ def main():
                 
                 else:
                     st.error("❌ Database not available. Enhanced features disabled.")
-                    
-            with portfolio_tab2:
                 st.subheader("➕ Manage Portfolio Holdings")
                 
                 if enhanced_manager.portfolio_db:
@@ -9830,8 +9845,6 @@ def main():
                         
                 else:
                     st.error("❌ Database not available")
-            
-            with portfolio_tab3:
                 st.subheader("📈 Portfolio Alerts")
                 
                 if enhanced_manager.portfolio_db:
@@ -9892,298 +9905,15 @@ def main():
                         st.dataframe(alerts_data, use_container_width=True)
                 else:
                     st.error("❌ Database not available")
-                    
-            with portfolio_tab4:
-                st.subheader("🔄 Portfolio Rebalancing")
-                
-                if enhanced_manager.portfolio_db:
-                    holdings = enhanced_manager.portfolio_db.get_current_holdings()
-                    
-                    if holdings.empty:
-                        st.info("📊 Add holdings to your portfolio to use rebalancing features")
-                    else:
-                        st.markdown("### ⚙️ Rebalancing Configuration")
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            target_size = st.slider("Target Portfolio Size", 5, 25, 15)
-                            min_score = st.slider("Minimum Score to Keep", 4.0, 8.0, 6.0, 0.1)
-                        
-                        with col2:
-                            rebalance_market = st.selectbox("Market Source", ["S&P 500", "NASDAQ 100", "Danish Stocks"], key="what_if_rebalance_market")
-                            aggressive_mode = st.checkbox("Aggressive Rebalancing", key="what_if_aggressive_mode")
-                        
-                        if st.button("🔄 Analyze Rebalancing", type="primary", key="what_if_analyze_rebalancing"):
-                            with st.spinner("Analyzing portfolio..."):
-                                st.success("✅ Rebalancing analysis complete!")
-                                
-                                # Sample rebalancing suggestions
-                                st.markdown("### 📋 Rebalancing Suggestions")
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.markdown("**🗑️ Consider Removing:**")
-                                    st.write("• Low performing stocks")
-                                    st.write("• Over-allocated positions")
-                                
-                                with col2:
-                                    st.markdown("**➕ Consider Adding:**")
-                                    st.write("• High-scoring opportunities")
-                                    st.write("• Underrepresented sectors")
-                else:
-                    st.error("❌ Database not available")
-                    
-            with portfolio_tab5:
-                st.subheader("🔍 Weekly Market Screener")
-                
-                st.markdown("### 🎯 Screening Parameters")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    screener_market = st.selectbox("Market to Screen", ["S&P 500", "NASDAQ 100", "Danish Stocks", "All Markets"], key="what_if_screener_market")
-                    min_score = st.slider("Minimum Score", 5.0, 9.0, 7.0, 0.1)
-                
-                with col2:
-                    max_results = st.number_input("Max Results", 5, 50, 20)
-                    exclude_current = st.checkbox("Exclude Current Holdings", True)
-                
-                if st.button("🚀 Run Market Screening", type="primary"):
-                    with st.spinner("Screening market..."):
-                        st.success(f"✅ Found opportunities in {screener_market}!")
-                        
-                        # Sample screening results
-                        sample_results = {
-                            'Symbol': ['NVDA', 'AMD', 'CRM', 'NFLX'],
-                            'Score': [8.5, 8.2, 7.8, 7.6],
-                            'Sector': ['Technology', 'Technology', 'Technology', 'Communication'],
-                            'P/E Ratio': [65.2, 42.1, 55.8, 34.7]
-                        }
-                        st.dataframe(sample_results, use_container_width=True)
-                        
-                        # Quick add to portfolio
-                        selected_stocks = st.multiselect("Select stocks to add:", sample_results['Symbol'])
-                        
-                        if selected_stocks and st.button("➕ Add Selected to Portfolio", key="add_selected_to_portfolio"):
-                            for symbol in selected_stocks:
-                                if enhanced_manager.portfolio_db:
-                                    enhanced_manager.portfolio_db.add_holding(symbol, 1.0, 100.0)
-                            st.success(f"✅ Added {len(selected_stocks)} stocks to portfolio!")
-                            
-            with portfolio_tab6:
-                st.subheader("💾 Backup & Data Persistence")
-                
-                # Display comprehensive data persistence warnings
-                st.warning("""
-                ⚠️ **CRITICAL: Streamlit Cloud Data Persistence**
-                
-                **Your data is stored temporarily and WILL BE LOST when:**
-                - App restarts (happens daily on Streamlit Cloud)
-                - User inactivity (30+ minutes)
-                - App redeployment or updates
-                - Browser refresh or closure
-                
-                **🔐 PROTECT YOUR DATA:** Use backup features below!
-                """)
-                
-                # Backup & Restore Interface
-                st.session_state.cloud_backup_manager.display_backup_interface()
-                
-                st.markdown("---")
-                st.markdown("### ⚙️ Enhanced Portfolio Settings")
-                
-                # Database management for enhanced portfolio
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**📊 Database Management**")
-                    
-                    if enhanced_manager.portfolio_db:
-                        holdings_count = len(enhanced_manager.portfolio_db.get_current_holdings())
-                        st.metric("Holdings in Database", holdings_count)
-                        
-                        if st.button("🗑️ Clear All Holdings", type="secondary"):
-                            if st.button("⚠️ Confirm Clear", key="confirm_clear_enhanced"):
-                                try:
-                                    # Clear enhanced portfolio database
-                                    enhanced_manager.portfolio_db.clear_all_holdings()
-                                    st.success("✅ All holdings cleared from enhanced portfolio!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ Error clearing holdings: {e}")
-                        
-                        if st.button("📥 Export Enhanced Portfolio", type="secondary", key="export_enhanced_portfolio_btn"):
-                            holdings = enhanced_manager.portfolio_db.get_current_holdings()
-                            if not holdings.empty:
-                                csv = holdings.to_csv(index=False)
-                                st.download_button(
-                                    "📥 Download Enhanced Portfolio CSV",
-                                    data=csv,
-                                    file_name=f"enhanced_portfolio_{datetime.now().strftime('%Y%m%d')}.csv",
-                                    mime="text/csv"
-                                )
-                            else:
-                                st.info("No holdings to export")
-                
-                with col2:
-                    st.markdown("**🔄 Migration Tools**")
-                    
-                    # Legacy portfolio migration
-                    if hasattr(st.session_state, 'portfolio') and st.session_state.portfolio:
-                        st.info(f"Found {len(st.session_state.portfolio)} stocks in legacy format")
-                        
-                        if st.button("🔄 Migrate Legacy Portfolio", type="primary", key="migrate_legacy_portfolio"):
-                            migrated_count = 0
-                            errors = []
-                            
-                            for symbol in st.session_state.portfolio:
-                                try:
-                                    # Get current price for better migration
-                                    current_price = get_simple_current_price(symbol)
-                                    price = current_price if current_price and current_price > 0 else 100.0
-                                    
-                                    enhanced_manager.portfolio_db.add_holding(symbol, 1.0, price)
-                                    migrated_count += 1
-                                except Exception as e:
-                                    errors.append(f"{symbol}: {str(e)}")
-                            
-                            if migrated_count > 0:
-                                st.success(f"✅ Migrated {migrated_count} stocks to enhanced portfolio!")
-                                if errors:
-                                    st.warning(f"⚠️ {len(errors)} stocks had issues during migration")
-                                
-                                # Clear legacy portfolio after successful migration
-                                st.session_state.portfolio = []
-                                st.rerun()
-                            else:
-                                st.error("❌ No stocks could be migrated")
-                                if errors:
-                                    st.error("Errors: " + "; ".join(errors[:3]))
-                    else:
-                        st.info("No legacy portfolio found")
-                
-                # Sync enhanced portfolio with session state
-                st.markdown("---")
-                st.markdown("**🔄 Portfolio Synchronization**")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("📤 Sync Enhanced → Session State", help="Copy enhanced portfolio to session state for basic portfolio features"):
-                        try:
-                            holdings = enhanced_manager.portfolio_db.get_current_holdings()
-                            if not holdings.empty:
-                                st.session_state.portfolio = holdings['symbol'].tolist()
-                                
-                                # Also sync holdings data
-                                portfolio_holdings = {}
-                                for _, row in holdings.iterrows():
-                                    portfolio_holdings[row['symbol']] = {
-                                        "quantity": row['quantity'],
-                                        "purchase_price": row['purchase_price'],
-                                        "purchase_date": row['purchase_date']
-                                    }
-                                st.session_state.portfolio_holdings = portfolio_holdings
-                                
-                                st.success(f"✅ Synced {len(holdings)} stocks to session state!")
-                            else:
-                                st.info("No enhanced portfolio data to sync")
-                        except Exception as e:
-                            st.error(f"❌ Sync failed: {e}")
-                
-                with col2:
-                    if st.button("📥 Sync Session State → Enhanced", help="Copy session state portfolio to enhanced database"):
-                        try:
-                            portfolio_symbols = st.session_state.get('portfolio', [])
-                            portfolio_holdings = st.session_state.get('portfolio_holdings', {})
-                            
-                            if portfolio_symbols:
-                                synced_count = 0
-                                for symbol in portfolio_symbols:
-                                    holdings_data = portfolio_holdings.get(symbol, {})
-                                    quantity = holdings_data.get('quantity', 1.0)
-                                    purchase_price = holdings_data.get('purchase_price', 0.0)
-                                    
-                                    # Get current price if purchase price is 0
-                                    if purchase_price == 0.0:
-                                        current_price = get_simple_current_price(symbol)
-                                        purchase_price = current_price if current_price and current_price > 0 else 100.0
-                                    
-                                    try:
-                                        enhanced_manager.portfolio_db.add_holding(symbol, quantity, purchase_price)
-                                        synced_count += 1
-                                    except:
-                                        pass  # Skip duplicates
-                                
-                                st.success(f"✅ Synced {synced_count} stocks to enhanced portfolio!")
-                            else:
-                                st.info("No session state portfolio to sync")
-                        except Exception as e:
-                            st.error(f"❌ Sync failed: {e}")
-                
-                # Data persistence settings
-                st.markdown("---")
-                st.markdown("### 🔔 Data Persistence Settings")
-                
-                # Initialize session state for backup settings
-                if 'auto_backup_reminder' not in st.session_state:
-                    st.session_state.auto_backup_reminder = True
-                if 'backup_frequency_hours' not in st.session_state:
-                    st.session_state.backup_frequency_hours = 24
-                
-                def update_auto_backup_reminder():
-                    st.session_state.auto_backup_reminder = st.session_state.auto_backup_reminder_checkbox
-                
-                def update_backup_frequency():
-                    st.session_state.backup_frequency_hours = st.session_state.backup_frequency_slider
-                
-                auto_backup_reminder = st.checkbox(
-                    "🔔 Enable backup reminders",
-                    value=st.session_state.auto_backup_reminder,
-                    help="Show reminders to backup your data periodically",
-                    key="auto_backup_reminder_checkbox",
-                    on_change=update_auto_backup_reminder
-                )
-                
-                backup_frequency = st.slider(
-                    "Backup reminder frequency (hours)",
-                    min_value=1,
-                    max_value=168,  # 1 week
-                    value=st.session_state.backup_frequency_hours,
-                    help="How often to show backup reminders",
-                    key="backup_frequency_slider",
-                    on_change=update_backup_frequency
-                )
-                
-                # Show last backup info
-                if 'last_backup_time' in st.session_state:
-                    last_backup = datetime.fromisoformat(st.session_state.last_backup_time)
-                    time_since = datetime.now() - last_backup
-                    
-                    if time_since.total_seconds() < 3600:  # Less than 1 hour
-                        st.success(f"✅ Last backup: {int(time_since.total_seconds() / 60)} minutes ago")
-                    elif time_since.total_seconds() < 86400:  # Less than 1 day
-                        st.info(f"ℹ️ Last backup: {int(time_since.total_seconds() / 3600)} hours ago")
-                    else:
-                        st.warning(f"⚠️ Last backup: {time_since.days} days ago - Consider creating a new backup!")
-                else:
-                    st.warning("⚠️ No backup history found - Create your first backup!")
-                
-                # Quick backup action
-                if st.button("� Quick Backup Now", type="primary"):
-                    st.session_state.last_backup_time = datetime.now().isoformat()
-                    st.success("✅ Backup timestamp updated! Use the backup interface above to download your data.")
-                    st.rerun()
 
-    # --- What-If Analysis (Enhanced Features Only) ---
-    if st.session_state.get('enhanced_features_enabled', False):
-        with tab5:
-            st.header("🔮 What-If Portfolio Analysis")
-            st.markdown("🚀 **Simulate portfolio changes before committing - Test strategies safely**")
-            
-            enhanced_manager = st.session_state.enhanced_features_manager
-            
-            if enhanced_manager.what_if_analyzer:
+    # --- What-If Analysis ---
+    with tab5:
+        st.header("🔮 What-If Portfolio Analysis")
+        st.markdown("🚀 **Simulate portfolio changes before committing - Test strategies safely**")
+        
+        enhanced_manager = st.session_state.enhanced_features_manager
+        
+        if enhanced_manager.what_if_analyzer:
                 what_if = enhanced_manager.what_if_analyzer
                 
                 # What-If Analysis tabs
@@ -10766,8 +10496,8 @@ def main():
                     else:
                         st.info("🧮 No risk analysis available. Create a scenario first to compare risk profiles.")
                         
-            else:
-                st.error("❌ What-If Analyzer not available")
+        else:
+            st.error("❌ What-If Analyzer not available")
     
     # --- Tab 2: Market Intelligence (Market Screeners + Danish Stocks) ---
     with tab2:
@@ -11199,48 +10929,234 @@ def main():
             if notification_options:
                 st.success(f"✅ {len(notification_options)} notification types selected")
 
-    # --- Tab 3: Portfolio Command Center (Enhanced Portfolio + Performance Benchmarking + What-If Analysis) ---
+    # --- Tab 3: Portfolio Command Center (Enhanced-Only) ---
     with tab3:
         st.header("💼 Portfolio Command Center")
-        st.markdown("Complete portfolio management, performance tracking, and scenario analysis")
+        st.markdown("*Enterprise-grade portfolio management with SQLite database and advanced analytics*")
         
-        # Auto-sync enhanced portfolio data to session state for consistent display
-        if st.session_state.get('enhanced_features_enabled', False) and st.session_state.get('enhanced_features_manager'):
-            enhanced_manager = st.session_state.enhanced_features_manager
-            if enhanced_manager and enhanced_manager.portfolio_db:
-                try:
-                    # Automatically sync enhanced portfolio to session state
-                    holdings = enhanced_manager.portfolio_db.get_current_holdings()
-                    if not holdings.empty:
-                        # Update session state portfolio
-                        st.session_state.portfolio = holdings['symbol'].tolist()
+        # Enhanced features are required - no fallback mode
+        enhanced_manager = st.session_state.enhanced_features_manager
+        portfolio_manager = enhanced_manager.portfolio_db
+        
+        # Create portfolio management interface
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("Portfolio Actions")
+            action = st.selectbox("Select Action", [
+                "View Portfolio", "Add Stock", "Remove Stock", "Update Quantity",
+                "Analyze Portfolio", "What-If Analysis", "Export Data"
+            ])
+            
+            if action == "Add Stock":
+                with st.form("add_stock_form"):
+                    symbol = st.text_input("Stock Symbol").upper()
+                    quantity = st.number_input("Quantity", min_value=1, value=100)
+                    purchase_price = st.number_input("Purchase Price", min_value=0.01, value=100.0)
+                    
+                    if st.form_submit_button("Add Stock"):
+                        if symbol and quantity > 0:
+                            try:
+                                portfolio_manager.add_stock(symbol, quantity, purchase_price)
+                                st.success(f"✅ Added {quantity} shares of {symbol}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error adding stock: {str(e)}")
+            
+            elif action == "Remove Stock":
+                portfolio = portfolio_manager.get_portfolio()
+                if portfolio:
+                    symbol_to_remove = st.selectbox("Select stock to remove", list(portfolio.keys()))
+                    if st.button("Remove Stock"):
+                        portfolio_manager.remove_stock(symbol_to_remove)
+                        st.success(f"✅ Removed {symbol_to_remove}")
+                        st.rerun()
+                else:
+                    st.info("No stocks in portfolio to remove")
+            
+            elif action == "Update Quantity":
+                portfolio = portfolio_manager.get_portfolio()
+                if portfolio:
+                    symbol_to_update = st.selectbox("Select stock to update", list(portfolio.keys()))
+                    new_quantity = st.number_input("New Quantity", min_value=1, value=portfolio[symbol_to_update]['quantity'])
+                    if st.button("Update Quantity"):
+                        portfolio_manager.update_quantity(symbol_to_update, new_quantity)
+                        st.success(f"✅ Updated {symbol_to_update} to {new_quantity} shares")
+                        st.rerun()
+                else:
+                    st.info("No stocks in portfolio to update")
+            
+            elif action == "Analyze Portfolio":
+                portfolio = portfolio_manager.get_portfolio()
+                if portfolio:
+                    st.subheader("� Portfolio Analysis")
+                    
+                    # Calculate portfolio metrics
+                    total_value = 0
+                    total_cost = 0
+                    
+                    for symbol, data in portfolio.items():
+                        current_price = get_simple_current_price(symbol)
+                        if current_price:
+                            market_value = current_price * data['quantity']
+                            cost_basis = data['purchase_price'] * data['quantity']
+                            total_value += market_value
+                            total_cost += cost_basis
+                    
+                    if total_value > 0:
+                        total_return = total_value - total_cost
+                        return_pct = (total_return / total_cost) * 100
                         
-                        # Update session state holdings - map database columns to session state format
-                        portfolio_holdings = {}
-                        for _, row in holdings.iterrows():
-                            portfolio_holdings[row['symbol']] = {
-                                "quantity": row.get('quantity', 0),
-                                "purchase_price": row.get('average_cost', 0),  # Map average_cost to purchase_price
-                                "purchase_date": row.get('date_added', row.get('added_date', ''))  # Map date_added/added_date to purchase_date
-                            }
-                        st.session_state.portfolio_holdings = portfolio_holdings
-                        
-                        # Show sync status
-                        st.info(f"🔄 Auto-synced {len(holdings)} stocks from enhanced portfolio database")
+                        # Display key metrics
+                        metric_col1, metric_col2, metric_col3 = st.columns(3)
+                        with metric_col1:
+                            st.metric("Total Value", f"${total_value:,.2f}")
+                        with metric_col2:
+                            st.metric("Total Return", f"${total_return:,.2f}", f"{return_pct:.2f}%")
+                        with metric_col3:
+                            st.metric("Total Cost", f"${total_cost:,.2f}")
+                else:
+                    st.info("Add stocks to your portfolio to see analysis")
+            
+            elif action == "What-If Analysis":
+                portfolio = portfolio_manager.get_portfolio()
+                if portfolio and enhanced_manager.what_if_analyzer:
+                    st.subheader("🔮 What-If Analysis")
+                    
+                    scenario = st.selectbox("Choose Scenario", [
+                        "Market Crash (-20%)", "Market Boom (+30%)", 
+                        "Recession (-35%)", "Bull Market (+50%)", "Custom"
+                    ])
+                    
+                    if scenario == "Custom":
+                        custom_change = st.slider("Portfolio Change %", -50, 100, 0)
+                        scenario_change = custom_change / 100
                     else:
-                        # Clear session state if enhanced portfolio is empty
-                        st.session_state.portfolio = []
-                        st.session_state.portfolio_holdings = {}
-                except Exception as e:
-                    st.warning(f"⚠️ Auto-sync failed: {e}")
-                    # Provide more detailed error info for debugging
-                    if hasattr(enhanced_manager.portfolio_db, 'get_current_holdings'):
-                        try:
-                            test_holdings = enhanced_manager.portfolio_db.get_current_holdings()
-                            if not test_holdings.empty:
-                                st.info(f"🔍 Available columns: {list(test_holdings.columns)}")
-                        except:
-                            pass
+                        scenario_map = {
+                            "Market Crash (-20%)": -0.20,
+                            "Market Boom (+30%)": 0.30,
+                            "Recession (-35%)": -0.35,
+                            "Bull Market (+50%)": 0.50
+                        }
+                        scenario_change = scenario_map[scenario]
+                    
+                    if st.button("Run Analysis"):
+                        # Calculate current portfolio value
+                        current_value = 0
+                        for symbol, data in portfolio.items():
+                            current_price = get_simple_current_price(symbol)
+                            if current_price:
+                                current_value += current_price * data['quantity']
+                        
+                        if current_value > 0:
+                            projected_value = current_value * (1 + scenario_change)
+                            change_amount = projected_value - current_value
+                            
+                            st.markdown("### Results")
+                            result_col1, result_col2 = st.columns(2)
+                            with result_col1:
+                                st.metric("Current Value", f"${current_value:,.2f}")
+                                st.metric("Projected Value", f"${projected_value:,.2f}")
+                            with result_col2:
+                                st.metric("Change Amount", f"${change_amount:,.2f}")
+                                st.metric("Change Percent", f"{scenario_change*100:+.1f}%")
+                else:
+                    st.info("Add stocks to your portfolio for what-if analysis")
+        
+        with col2:
+            st.subheader("Portfolio Summary")
+            portfolio = portfolio_manager.get_portfolio()
+            
+            if portfolio:
+                st.metric("Stocks in Portfolio", len(portfolio))
+                
+                # Show holdings
+                st.markdown("### Holdings")
+                for symbol, data in list(portfolio.items())[:5]:
+                    current_price = get_simple_current_price(symbol)
+                    if current_price:
+                        market_value = current_price * data['quantity']
+                        st.write(f"**{symbol}**: {data['quantity']} shares")
+                        st.write(f"Value: ${market_value:,.2f}")
+                        st.write("---")
+                
+                if len(portfolio) > 5:
+                    st.write(f"... and {len(portfolio) - 5} more")
+            else:
+                st.info("Portfolio is empty")
+                st.write("Add stocks to get started!")
+        
+        # Portfolio table
+        if portfolio:
+            st.subheader("📊 Complete Portfolio")
+            portfolio_data = []
+            
+            for symbol, data in portfolio.items():
+                current_price = get_simple_current_price(symbol)
+                if current_price:
+                    market_value = current_price * data['quantity']
+                    cost_basis = data['purchase_price'] * data['quantity']
+                    gain_loss = market_value - cost_basis
+                    gain_loss_pct = (gain_loss / cost_basis) * 100 if cost_basis > 0 else 0
+                    
+                    portfolio_data.append({
+                        'Symbol': symbol,
+                        'Quantity': data['quantity'],
+                        'Purchase Price': f"${data['purchase_price']:.2f}",
+                        'Current Price': f"${current_price:.2f}",
+                        'Market Value': f"${market_value:,.2f}",
+                        'Gain/Loss': f"${gain_loss:,.2f}",
+                        'Gain/Loss %': f"{gain_loss_pct:.2f}%"
+                    })
+            
+            if portfolio_data:
+                df_portfolio = pd.DataFrame(portfolio_data)
+                st.dataframe(df_portfolio, use_container_width=True)
+
+    # --- Tab 5: Settings & Help ---
+    with tab5:
+        st.header("⚙️ Settings & Help")
+        st.markdown("Configure your system and access help documentation")
+        
+        # Settings and Help tabs
+        settings_tab1, settings_tab2, settings_tab3 = st.tabs([
+            "⚙️ System Settings",
+            "📚 Documentation", 
+            "❓ Help & Support"
+        ])
+        
+        with settings_tab1:
+            st.subheader("⚙️ System Configuration")
+            st.info("📋 System settings and configuration options would be displayed here")
+        
+        with settings_tab2:
+            st.subheader("📚 Documentation & Guides")
+            st.info("📖 User documentation and guides would be displayed here")
+        
+        with settings_tab3:
+            st.subheader("❓ Help & Support")
+            st.info("🆘 Help resources and support information would be displayed here")
+
+    # --- Tab 6: Advanced Tools ---
+    with tab6:
+        st.header("🚀 Advanced Tools")
+        st.markdown("Advanced analysis tools for scoring optimization and system improvement")
+        
+        # Advanced tools tabs
+        advanced_tab1, advanced_tab2, advanced_tab3, advanced_tab4 = st.tabs([
+            "🎯 Metric Effectiveness",
+            "📊 Weight Optimization",
+            "🏭 Sector Intelligence",
+            "📈 Risk Analytics"
+        ])
+        
+        with advanced_tab1:
+            st.subheader("🔍 Metric Effectiveness Analysis")
+            st.markdown("Discover which metrics actually predict performance in your scoring system")
+            
+            # Metric effectiveness analysis
+            if st.button("📊 Analyze Metric Performance", type="primary", key="analyze_metric_performance_simple_info_tab6"):
+                st.info("📊 Metric effectiveness analysis would be displayed here")
         
         # Portfolio sub-tabs
         portfolio_tab1, portfolio_tab2, portfolio_tab3, portfolio_tab4 = st.tabs([
@@ -11421,9 +11337,8 @@ def main():
                                     'date_added': datetime.now().isoformat()
                                 }
                             
-                            # Auto-sync to enhanced portfolio if available
-                            if (st.session_state.get('enhanced_features_enabled', False) and 
-                                st.session_state.get('enhanced_features_manager') and
+                            # Auto-sync to enhanced portfolio (enhanced-only mode)
+                            if (st.session_state.get('enhanced_features_manager') and
                                 st.session_state.enhanced_features_manager.portfolio_db):
                                 try:
                                     enhanced_manager = st.session_state.enhanced_features_manager
@@ -11468,9 +11383,8 @@ def main():
                                             'date_added': datetime.now().isoformat()
                                         }
                                         
-                                        # Auto-sync to enhanced portfolio if available
-                                        if (st.session_state.get('enhanced_features_enabled', False) and 
-                                            st.session_state.get('enhanced_features_manager') and
+                                        # Auto-sync to enhanced portfolio (enhanced-only mode)
+                                        if (st.session_state.get('enhanced_features_manager') and
                                             st.session_state.enhanced_features_manager.portfolio_db):
                                             try:
                                                 enhanced_manager = st.session_state.enhanced_features_manager
@@ -11500,9 +11414,8 @@ def main():
                             if remove_symbol in st.session_state.portfolio_holdings:
                                 del st.session_state.portfolio_holdings[remove_symbol]
                             
-                            # Auto-sync removal to enhanced portfolio if available
-                            if (st.session_state.get('enhanced_features_enabled', False) and 
-                                st.session_state.get('enhanced_features_manager') and
+                            # Auto-sync removal to enhanced portfolio (enhanced-only mode)
+                            if (st.session_state.get('enhanced_features_manager') and
                                 st.session_state.enhanced_features_manager.portfolio_db):
                                 try:
                                     enhanced_manager = st.session_state.enhanced_features_manager
@@ -11520,9 +11433,8 @@ def main():
                     st.session_state.portfolio = []
                     st.session_state.portfolio_holdings = {}
                     
-                    # Auto-sync clear to enhanced portfolio if available
-                    if (st.session_state.get('enhanced_features_enabled', False) and 
-                        st.session_state.get('enhanced_features_manager') and
+                    # Auto-sync clear to enhanced portfolio (enhanced-only mode)
+                    if (st.session_state.get('enhanced_features_manager') and
                         st.session_state.enhanced_features_manager.portfolio_db):
                         try:
                             enhanced_manager = st.session_state.enhanced_features_manager
@@ -11685,17 +11597,6 @@ def main():
         
         with portfolio_tab4:
             st.subheader("💾 Backup & Settings")
-            
-            # Critical data warning
-            st.error("""
-            🚨 **CRITICAL: DATA PERSISTENCE WARNING**
-            
-            **Your portfolio data is stored temporarily and WILL BE LOST when:**
-            - App restarts (happens daily on Streamlit Cloud)
-            - Browser refresh or closure
-            - User inactivity timeout
-            - App updates or redeployment
-            """)
             
             # Backup section
             st.markdown("### 💾 Backup Your Portfolio")
@@ -11933,7 +11834,7 @@ def main():
                         len(st.session_state.portfolio_holdings),
                         len(st.session_state.get('analysis_history', [])),
                         len(st.session_state.get('selected_symbols', [])),
-                        "✅ Enabled" if st.session_state.get('enhanced_features_enabled', False) else "❌ Disabled"
+                        "✅ Enabled"  # Enhanced-only mode
                     ]
                 }
                 
@@ -12003,7 +11904,7 @@ def main():
             st.markdown("Discover which metrics actually predict performance in your scoring system")
             
             # Metric effectiveness analysis
-            if st.button("📊 Analyze Metric Performance", type="primary", key="analyze_metric_performance_tab6"):
+            if st.button("📊 Analyze Metric Performance", type="primary", key="analyze_metric_performance_advanced_tab1"):
                 if not st.session_state.portfolio:
                     st.warning("⚠️ Add some stocks to your portfolio first to enable metric analysis")
                 else:
