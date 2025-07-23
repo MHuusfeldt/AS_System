@@ -1,11 +1,5 @@
 {
-  "symbols": [
-    "AAPL",
-    "MSFT",
-    "NOVO-B.CO",
-    "ORSTED.CO",
-    "DSV.CO"
-  ],
-  "last_updated": "2025-07-18T13:34:28.108735",
-  "total_stocks": 5
+  "symbols": [],
+  "last_updated": "2025-07-23T08:30:57.945021",
+  "total_stocks": 0
 }
